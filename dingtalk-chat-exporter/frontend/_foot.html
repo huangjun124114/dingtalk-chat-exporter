@@ -1,0 +1,128 @@
+<div class="lightbox" id="lightbox"><img id="lightbox-img" src="" alt="图片预览"></div>
+
+<div class="search-overlay" id="searchOverlay">
+  <input type="text" id="searchInput2" placeholder="搜索聊天记录..." autocomplete="off">
+  <span id="searchCount">0/0</span>
+  <button id="searchPrevBtn" title="上一个">↑</button>
+  <button id="searchNextBtn" title="下一个">↓</button>
+  <button id="searchCloseBtn" title="关闭">✕</button>
+</div>
+
+<div class="toolbar">
+  <button id="memberBtn">成员</button>
+  <button id="viewerSearchBtn">搜索</button>
+  <button id="scrollTopBtn">顶部</button>
+  <button id="scrollBottomBtn">底部</button>
+</div>
+<script>
+function openViewer(src){
+  document.getElementById('lightbox-img').src=src;
+  document.getElementById('lightbox').classList.add('open');
+}
+function toggleSidebar(){document.querySelector('.sidebar').classList.toggle('open');}
+function scrollToTop(){window.scrollTo({top:0,behavior:'smooth'});}
+function scrollToBottom(){window.scrollTo({top:document.body.scrollHeight,behavior:'smooth'});}
+
+var searchMatches=[],searchIdx=-1;
+function openSearchBar(){
+  var overlay=document.getElementById('searchOverlay');
+  overlay.style.display='flex';
+  var input=document.getElementById('searchInput2');
+  input.value='';
+  input.focus();
+  document.getElementById('searchCount').textContent='0/0';
+}
+function closeSearch(){
+  document.getElementById('searchOverlay').style.display='none';
+  clearSearchHighlight();
+  searchMatches=[];
+  searchIdx=-1;
+}
+function clearSearchHighlight(){
+  document.querySelectorAll('.search-current,.search-hit').forEach(function(element){
+    element.classList.remove('search-current');
+    element.classList.remove('search-hit');
+  });
+  document.querySelectorAll('.msg-row').forEach(function(row){row.style.display='';});
+}
+function doSearchText(keyword){
+  clearSearchHighlight();
+  if(!keyword){
+    document.getElementById('searchCount').textContent='0/0';
+    searchMatches=[];
+    return;
+  }
+  searchMatches=[];
+  document.querySelectorAll('.msg-row').forEach(function(row){
+    var bubble=row.querySelector('.bubble');
+    if(bubble&&bubble.textContent.indexOf(keyword)>=0){
+      row.style.display='';
+      searchMatches.push(row);
+      bubble.classList.add('search-hit');
+    }else{
+      row.style.display='none';
+    }
+  });
+  if(searchMatches.length>0){
+    searchIdx=0;
+    highlightCurrent();
+  }else{
+    searchIdx=-1;
+    document.getElementById('searchCount').textContent='0/0';
+  }
+}
+function highlightCurrent(){
+  searchMatches.forEach(function(row){
+    var bubble=row.querySelector('.bubble');
+    if(bubble){bubble.classList.remove('search-current');}
+  });
+  if(searchIdx>=0&&searchIdx<searchMatches.length){
+    var current=searchMatches[searchIdx];
+    var bubble=current.querySelector('.bubble');
+    if(bubble){bubble.classList.add('search-current');}
+    current.scrollIntoView({behavior:'smooth',block:'center'});
+    document.getElementById('searchCount').textContent=(searchIdx+1)+'/'+searchMatches.length;
+  }
+}
+function searchNav(direction){
+  if(searchMatches.length===0){return;}
+  searchIdx+=direction;
+  if(searchIdx>=searchMatches.length){searchIdx=0;}
+  if(searchIdx<0){searchIdx=searchMatches.length-1;}
+  highlightCurrent();
+}
+
+document.getElementById('lightbox').addEventListener('click',function(){
+  this.classList.remove('open');
+  document.getElementById('lightbox-img').src='';
+});
+document.addEventListener('click',function(event){
+  var image=event.target.closest('.chat-image');
+  if(image){openViewer(image.src);}
+});
+document.getElementById('memberBtn').addEventListener('click',toggleSidebar);
+document.getElementById('viewerSearchBtn').addEventListener('click',openSearchBar);
+document.getElementById('scrollTopBtn').addEventListener('click',scrollToTop);
+document.getElementById('scrollBottomBtn').addEventListener('click',scrollToBottom);
+document.getElementById('searchPrevBtn').addEventListener('click',function(){searchNav(-1);});
+document.getElementById('searchNextBtn').addEventListener('click',function(){searchNav(1);});
+document.getElementById('searchCloseBtn').addEventListener('click',closeSearch);
+document.getElementById('searchInput2').addEventListener('input',function(){
+  doSearchText(this.value.trim());
+});
+document.getElementById('searchInput2').addEventListener('keydown',function(event){
+  if(event.key==='Enter'){event.preventDefault();searchNav(event.shiftKey?-1:1);}
+  if(event.key==='Escape'){closeSearch();}
+});
+document.addEventListener('keydown',function(event){
+  if((event.ctrlKey||event.metaKey)&&event.key==='f'){
+    event.preventDefault();
+    openSearchBar();
+  }
+  if(event.key==='Escape'&&document.getElementById('lightbox').classList.contains('open')){
+    document.getElementById('lightbox').classList.remove('open');
+  }
+});
+</script>
+</body>
+</html>

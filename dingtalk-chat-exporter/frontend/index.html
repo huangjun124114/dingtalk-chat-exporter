@@ -1,0 +1,561 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>钉钉群聊导出器</title>
+<style>
+:root{--blue:#1677FF;--blue-light:#E8F1FF;--bg:#F5F6F8;--card:#FFF;--text:#171A1D;--sub:#86909C;--border:#E5E6EB;--green:#00B42A;--red:#F53F3F;--orange:#FF7D00;}
+*{margin:0;padding:0;box-sizing:border-box;}
+body{font-family:"PingFang SC","Microsoft YaHei",-apple-system,BlinkMacSystemFont,sans-serif;background:var(--bg);color:var(--text);height:100vh;overflow:hidden;display:flex;flex-direction:column;}
+/* 顶部栏 */
+.topbar{background:var(--card);border-bottom:1px solid var(--border);padding:12px 24px;display:flex;align-items:center;gap:16px;flex-shrink:0;}
+.topbar .logo{width:36px;height:36px;border-radius:8px;background:var(--blue);color:#fff;display:flex;align-items:center;justify-content:center;font-size:18px;font-weight:700;}
+.topbar h1{font-size:17px;font-weight:600;}
+.topbar .ver{font-size:12px;color:var(--sub);}
+.topbar .env-status{margin-left:auto;display:flex;align-items:center;gap:8px;font-size:13px;}
+.dot{width:8px;height:8px;border-radius:50%;display:inline-block;}
+.dot.ok{background:var(--green);} .dot.err{background:var(--red);} .dot.wait{background:var(--orange);}
+/* 主区域 */
+.main{flex:1;overflow-y:auto;padding:20px 24px;}
+/* 步骤卡片 */
+.card{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:20px;margin-bottom:16px;}
+.card h2{font-size:15px;font-weight:600;margin-bottom:14px;display:flex;align-items:center;gap:8px;}
+.step-num{width:22px;height:22px;border-radius:50%;background:var(--blue);color:#fff;font-size:12px;display:flex;align-items:center;justify-content:center;font-weight:600;}
+/* 搜索栏 */
+.search-bar{display:flex;gap:8px;margin-bottom:14px;}
+.search-bar input{flex:1;padding:9px 14px;border:1px solid var(--border);border-radius:8px;font-size:14px;outline:none;}
+.search-bar input:focus{border-color:var(--blue);box-shadow:0 0 0 2px var(--blue-light);}
+.search-bar button,.btn{padding:9px 18px;border:none;border-radius:8px;font-size:14px;cursor:pointer;font-weight:500;transition:opacity .15s;}
+.btn-blue{background:var(--blue);color:#fff;} .btn-blue:hover{opacity:.9;}
+.btn-blue:disabled{background:#C9CDD4;cursor:not-allowed;}
+.btn-outline{background:transparent;border:1px solid var(--border);color:var(--text);} .btn-outline:hover{background:var(--bg);}
+.btn-green{background:var(--green);color:#fff;}
+.btn-red{background:#FFF2F0;border:1px solid #FFCCC7;color:var(--red);}
+.export-actions{display:flex;gap:8px;align-items:stretch;}
+.export-button{flex:1;padding:12px;font-size:15px;}
+.diagnostic-button{flex:0 0 auto;min-width:148px;}
+.cancel-button{display:none;width:100%;margin-top:8px;}
+.cancel-button.is-visible{display:block;}
+/* 群列表 */
+.group-list{max-height:280px;overflow-y:auto;border:1px solid var(--border);border-radius:8px;}
+.group-item{display:flex;align-items:center;gap:12px;padding:12px 16px;border-bottom:1px solid var(--border);cursor:pointer;transition:background .1s;}
+.group-item:last-child{border-bottom:none;}
+.group-item:hover{background:var(--bg);}
+.group-item.selected{background:var(--blue-light);}
+.group-item .gicon{width:36px;height:36px;border-radius:8px;background:var(--blue);color:#fff;display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:600;flex-shrink:0;}
+.group-item .ginfo{flex:1;}
+.group-item .gname{font-size:14px;font-weight:500;}
+.group-item .gmeta{font-size:12px;color:var(--sub);margin-top:2px;}
+.group-item .check{width:20px;height:20px;border:2px solid var(--border);border-radius:6px;flex-shrink:0;display:flex;align-items:center;justify-content:center;transition:all .1s;}
+.group-item.selected .check{background:var(--blue);border-color:var(--blue);}
+.group-item.selected .check::after{content:"✓";color:#fff;font-size:13px;font-weight:700;}
+.empty{text-align:center;padding:32px;color:var(--sub);font-size:14px;}
+/* 输出目录 */
+.output-bar{display:flex;align-items:center;gap:12px;}
+.output-bar .path{flex:1;padding:9px 14px;background:var(--bg);border:1px solid var(--border);border-radius:8px;font-size:13px;color:var(--sub);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+/* 进度(默认隐藏,导出时 JS 设 display:block) */
+.export-progress{display:none;margin-top:14px;}
+.progress-text{font-size:13px;color:var(--sub);margin-bottom:8px;}
+.log-box{background:#1e1e1e;color:#d4d4d4;border-radius:8px;padding:12px;font-family:"SF Mono",Menlo,Consolas,monospace;font-size:12px;line-height:1.6;max-height:240px;overflow-y:auto;white-space:pre-wrap;word-break:break-all;}
+.log-box .err{color:#f48771;}
+/* 结果(默认隐藏,完成时 JS 设 display:flex) */
+.export-result{display:none;margin-top:16px;padding:16px;background:var(--bg);border-radius:10px;align-items:center;gap:14px;}
+.export-result .done-icon{width:40px;height:40px;border-radius:50%;background:var(--green);color:#fff;display:flex;align-items:center;justify-content:center;font-size:20px;flex-shrink:0;}
+.export-result .result-info{flex:1;min-width:0;}
+.export-result .result-title{font-size:15px;font-weight:600;margin-bottom:2px;}
+.export-result .result-desc{font-size:13px;color:var(--sub);}
+.export-result .btn-green{flex-shrink:0;}
+/* 错误提示 */
+.err-banner{display:none;background:#FFF2F0;border:1px solid #FFCCC7;color:var(--red);padding:12px 16px;border-radius:8px;font-size:13px;margin-bottom:16px;white-space:pre-wrap;}
+.err-banner.show{display:block;}
+</style>
+</head>
+<body>
+<div class="topbar">
+  <div class="logo">聊</div>
+  <div>
+    <h1>钉钉群聊导出器</h1>
+    <div class="ver"><span id="appVersion">v…</span> · 选择群 · 自动导出消息和附件</div>
+  </div>
+  <div class="env-status" id="envStatus">
+    <span class="dot wait"></span>
+    <span id="envText">检查 dws 环境...</span>
+  </div>
+</div>
+
+<div class="main">
+  <div class="err-banner" id="errBanner"></div>
+
+  <!-- 环境引导(未安装或未登录时显示) -->
+  <div class="card" id="loginCard" style="display:none;border:2px solid #FF7D00;background:#FFF7E6;">
+    <div id="guideIcon" style="font-size:36px;margin-bottom:8px;">🔐</div>
+    <div style="font-size:16px;font-weight:600;margin-bottom:6px;" id="guideTitle">需要先登录钉钉</div>
+    <div style="font-size:13px;color:var(--sub);margin-bottom:14px;line-height:1.6;" id="loginHint">点击下方按钮打开终端登录 dws</div>
+    <button class="btn btn-blue" id="loginBtn">打开登录</button>
+    <button class="btn btn-outline" id="installBtn" style="display:none;margin-left:8px;">查看安装教程</button>
+    <button class="btn btn-outline" id="recheckBtn" style="display:none;margin-left:8px;">已登录,刷新检测</button>
+  </div>
+
+  <!-- 步骤1: 搜索群 -->
+  <div class="card">
+    <h2><span class="step-num">1</span> 搜索要导出的群</h2>
+    <div class="search-bar">
+      <input type="text" id="searchInput" placeholder="输入群名称关键词,如:技术支持">
+      <button class="btn btn-blue" id="searchBtn">搜索</button>
+    </div>
+    <div class="group-list" id="groupList">
+      <div class="empty">先搜索群,然后勾选要导出的群</div>
+    </div>
+  </div>
+
+  <!-- 步骤2: 输出目录 -->
+  <div class="card">
+    <h2><span class="step-num">2</span> 选择保存位置</h2>
+    <div class="output-bar">
+      <div class="path" id="outputPath">未选择</div>
+      <button class="btn btn-outline" id="chooseDirBtn">选择文件夹</button>
+    </div>
+  </div>
+
+  <!-- 步骤3: 导出 -->
+  <div class="card">
+    <h2><span class="step-num">3</span> 开始导出</h2>
+    <div class="export-actions">
+      <button class="btn btn-blue export-button" id="exportBtn" disabled>请先在上方搜索并勾选群</button>
+      <button class="btn btn-outline diagnostic-button" id="diagnosticBtn" title="保存自动脱敏的诊断日志；发送前请人工复核">导出诊断日志</button>
+    </div>
+    <button class="btn btn-red cancel-button" id="cancelBtn">取消导出</button>
+    <!-- 进度(导出时才显示) -->
+    <div id="progressArea" class="export-progress">
+      <div class="progress-text" id="progressText">准备中...</div>
+      <div class="log-box" id="logBox"></div>
+    </div>
+    <!-- 完成(导出完成后才显示) -->
+    <div id="resultArea" class="export-result">
+      <div class="done-icon">✓</div>
+      <div class="result-info">
+        <div class="result-title" id="resultTitle">导出完成!</div>
+        <div class="result-desc" id="resultText"></div>
+      </div>
+      <button class="btn btn-green" id="openResultBtn">打开文件夹</button>
+    </div>
+  </div>
+</div>
+
+<script>
+let invoke;
+if (window.__TAURI_INTERNALS__ && window.__TAURI_INTERNALS__.invoke) {
+  invoke = window.__TAURI_INTERNALS__.invoke;
+}
+
+let selectedGroups = [];
+let outputPath = '';
+let lastResultPath = '';
+let polling = null;
+let isAuthed = false;
+
+// 初始化:检查 dws 环境
+async function init() {
+  if (!invoke) { showEnvError('程序初始化失败: 无法连接后端'); return; }
+  try {
+    const appVersion = await invoke('get_app_version');
+    if (appVersion) {
+      document.getElementById('appVersion').textContent = `v${appVersion}`;
+    }
+    // 默认使用应用或 EXE 所在目录；macOS 隔离运行时回退到下载目录
+    const defaultDir = await invoke('get_default_output_dir');
+    if (defaultDir) {
+      outputPath = defaultDir;
+      document.getElementById('outputPath').textContent = defaultDir;
+    }
+    // 先检测 dws 是否安装
+    const installed = await invoke('check_dws_installed');
+    if (!installed) {
+      showNotInstalled();
+      return;
+    }
+    // dws 已安装,检查登录状态
+    let envResult;
+    try {
+      envResult = await invoke('check_env');
+    } catch(e) {
+      showNotLoggedIn(String(e));
+      return;
+    }
+    updateEnvStatus(envResult);
+    document.getElementById('loginCard').style.display = 'none';
+    updateExportBtn();
+  } catch(e) {
+    showEnvError(String(e));
+  }
+}
+
+// 未安装 dws
+function showNotInstalled() {
+  isAuthed = false;
+  const dot = document.querySelector('#envStatus .dot');
+  dot.className = 'dot err';
+  document.getElementById('envText').textContent = 'dws 未安装';
+  document.getElementById('guideIcon').textContent = '📦';
+  document.getElementById('guideTitle').textContent = '需要先安装钉钉 CLI 工具 (dws)';
+  document.getElementById('loginHint').textContent = 'dws 是钉钉命令行工具,本程序依赖它来导出群聊数据。安装后重新打开本程序即可。';
+  document.getElementById('loginCard').style.display = 'block';
+  document.getElementById('loginBtn').style.display = 'none';
+  document.getElementById('installBtn').style.display = 'inline-block';
+  document.getElementById('recheckBtn').style.display = 'inline-block';
+  updateExportBtn();
+}
+
+// 已安装但未登录
+function showNotLoggedIn(msg) {
+  isAuthed = false;
+  const dot = document.querySelector('#envStatus .dot');
+  dot.className = 'dot err';
+  document.getElementById('envText').textContent = 'dws 未登录';
+  document.getElementById('guideIcon').textContent = '🔐';
+  document.getElementById('guideTitle').textContent = '需要先登录钉钉';
+  document.getElementById('loginHint').textContent = msg ? msg.substring(0, 120) : '点击下方按钮打开终端,执行 dws auth login 登录';
+  document.getElementById('loginCard').style.display = 'block';
+  document.getElementById('loginBtn').style.display = 'inline-block';
+  document.getElementById('loginBtn').textContent = '打开登录';
+  document.getElementById('installBtn').style.display = 'none';
+  document.getElementById('recheckBtn').style.display = 'inline-block';
+  updateExportBtn();
+}
+
+function updateEnvStatus(snap) {
+  const dot = document.querySelector('#envStatus .dot');
+  const text = document.getElementById('envText');
+  if (snap.authed && snap.authInfo) {
+    isAuthed = true;
+    dot.className = 'dot ok';
+    text.textContent = `${snap.authInfo.corpName} · ${snap.authInfo.userName}`;
+  } else {
+    isAuthed = false;
+    dot.className = 'dot err';
+    text.textContent = 'dws 未登录';
+  }
+}
+
+function showEnvError(msg) {
+  isAuthed = false;
+  const dot = document.querySelector('#envStatus .dot');
+  document.getElementById('envText').textContent = 'dws 未就绪';
+  dot.className = 'dot err';
+  showNotLoggedIn(msg);
+}
+
+async function doLogin() {
+  const btn = document.getElementById('loginBtn');
+  btn.disabled = true; btn.textContent = '正在打开终端...';
+  try {
+    await invoke('login_dws');
+    btn.textContent = '重新打开登录';
+    btn.disabled = false;
+    document.getElementById('recheckBtn').style.display = 'inline-block';
+  } catch(e) {
+    alert('打开登录失败: ' + e);
+    btn.disabled = false; btn.textContent = '打开登录';
+  }
+}
+
+async function checkLoginAgain() {
+  const btn = document.getElementById('recheckBtn');
+  btn.disabled = true; btn.textContent = '检查中...';
+  try {
+    const installed = await invoke('check_dws_installed');
+    if (!installed) { showNotInstalled(); return; }
+    const envResult = await invoke('check_env');
+    updateEnvStatus(envResult);
+    document.getElementById('loginCard').style.display = 'none';
+    updateExportBtn();
+  } catch(e) {
+    showNotLoggedIn(String(e));
+  } finally {
+    btn.textContent = '重新检测';
+    btn.disabled = false;
+  }
+}
+
+// 搜索群
+async function doSearch() {
+  const q = document.getElementById('searchInput').value.trim();
+  if (!q) return;
+  if (!invoke) { alert('程序初始化失败,请重启'); return; }
+  const btn = document.getElementById('searchBtn');
+  btn.disabled = true; btn.textContent = '搜索中...';
+  try {
+    const groups = await invoke('search_groups', { query: q });
+    renderGroups(groups);
+  } catch(e) {
+    const errMsg = String(e);
+    document.getElementById('groupList').innerHTML = `<div class="empty" style="color:var(--red);">搜索失败: ${escapeHtml(errMsg)}</div>`;
+    alert('搜索失败:\n\n' + errMsg);
+  }
+  btn.disabled = false; btn.textContent = '搜索';
+}
+
+function renderGroups(groups) {
+  const list = document.getElementById('groupList');
+  if (!groups || groups.length === 0) {
+    list.innerHTML = '<div class="empty">未找到匹配的群</div>';
+    return;
+  }
+  list.innerHTML = groups.map((g, i) => {
+    const icon = initials(g.title || '?');
+    return `<div class="group-item" data-idx="${i}">
+      <div class="gicon">${escapeHtml(icon)}</div>
+      <div class="ginfo">
+        <div class="gname">${escapeHtml(g.title)}</div>
+        <div class="gmeta">${g.memberCount || 0} 人${g.createAt ? ' · 创建于 ' + escapeHtml(g.createAt.substring(0,10)) : ''}</div>
+      </div>
+      <div class="check"></div>
+    </div>`;
+  }).join('');
+  // 用事件委托代替 inline onclick
+  list.querySelectorAll('.group-item').forEach(item => {
+    item.addEventListener('click', function() {
+      toggleGroup(this, parseInt(this.dataset.idx));
+    });
+  });
+  window._searchResults = groups;
+  selectedGroups = [];
+  updateExportBtn();
+}
+
+function initials(value) {
+  if (typeof Intl !== 'undefined' && Intl.Segmenter) {
+    const segments = new Intl.Segmenter('zh-CN', { granularity: 'grapheme' }).segment(String(value));
+    return Array.from(segments, item => item.segment).slice(0, 2).join('');
+  }
+  return Array.from(String(value)).slice(0, 2).join('');
+}
+
+function toggleGroup(el, idx) {
+  const groups = window._searchResults || [];
+  const g = groups[idx];
+  if (!g) return;
+  const existing = selectedGroups.findIndex(x => x.openConversationId === g.openConversationId);
+  if (existing >= 0) {
+    selectedGroups.splice(existing, 1);
+    el.classList.remove('selected');
+  } else {
+    selectedGroups.push({ title: g.title, openConversationId: g.openConversationId });
+    el.classList.add('selected');
+  }
+  updateExportBtn();
+}
+
+function updateExportBtn() {
+  const btn = document.getElementById('exportBtn');
+  if (!isAuthed) {
+    btn.disabled = true;
+    btn.textContent = '请先登录并完成环境检测';
+  } else if (selectedGroups.length > 0 && outputPath) {
+    btn.disabled = false;
+    btn.textContent = `导出 ${selectedGroups.length} 个群`;
+  } else if (selectedGroups.length > 0 && !outputPath) {
+    btn.disabled = true;
+    btn.textContent = '请先选择保存位置';
+  } else {
+    btn.disabled = true;
+    btn.textContent = '请先在上方搜索并勾选群';
+  }
+}
+
+// 选择目录(通过 Rust 后端调系统目录选择器)
+async function chooseDir() {
+  try {
+    const selected = await invoke('choose_output_dir');
+    if (selected) {
+      outputPath = selected;
+      document.getElementById('outputPath').textContent = selected;
+      updateExportBtn();
+    }
+  } catch(e) {
+    alert('打开目录选择器失败: ' + e);
+  }
+}
+
+// 导出
+async function doExport() {
+  const btn = document.getElementById('exportBtn');
+  btn.disabled = true;
+  btn.textContent = '导出中...';
+  const cancelBtn = document.getElementById('cancelBtn');
+  cancelBtn.disabled = false;
+  cancelBtn.textContent = '取消导出';
+  cancelBtn.classList.remove('is-visible');
+  document.getElementById('errBanner').classList.remove('show');
+  document.getElementById('resultArea').style.display = 'none';
+  document.getElementById('progressArea').style.display = 'block';
+  document.getElementById('logBox').replaceChildren();
+  try {
+    await invoke('export_groups', {
+      groups: selectedGroups,
+      outputRoot: outputPath
+    });
+    cancelBtn.classList.add('is-visible');
+    startPolling();
+  } catch(e) {
+    document.getElementById('progressText').textContent = '启动失败: ' + e;
+    cancelBtn.classList.remove('is-visible');
+    updateExportBtn();
+  }
+}
+
+function startPolling() {
+  if (polling) clearTimeout(polling);
+  let nextLogIndex = 0;
+  let consecutiveFailures = 0;
+
+  const poll = async () => {
+    try {
+      const snap = await invoke('snapshot', { logFrom: nextLogIndex });
+      consecutiveFailures = 0;
+      if (snap.task) {
+        document.getElementById('progressText').textContent = snap.task.progressText;
+        const logStart = Number(snap.task.logStart || 0);
+        const logEnd = logStart + snap.task.log.length;
+        const box = document.getElementById('logBox');
+        const shouldFollowLog = box.scrollHeight - box.scrollTop - box.clientHeight < 24;
+        if (nextLogIndex < logStart || nextLogIndex > logEnd) {
+          box.replaceChildren();
+          if (nextLogIndex < logStart) {
+            appendLogLine(box, '…较早日志已从内存中淘汰…', false);
+          }
+          nextLogIndex = logStart;
+        }
+        snap.task.log.slice(nextLogIndex - logStart).forEach(line => {
+          appendLogLine(box, line, line.includes('失败') || line.includes('错误'));
+        });
+        nextLogIndex = logEnd;
+        if (shouldFollowLog) box.scrollTop = box.scrollHeight;
+
+        if (['done', 'error', 'cancelled'].includes(snap.task.status)) {
+          polling = null;
+          showTaskResult(snap.task);
+          return;
+        }
+      }
+    } catch(e) {
+      consecutiveFailures += 1;
+      if (consecutiveFailures >= 3) {
+        const banner = document.getElementById('errBanner');
+        banner.textContent = '读取导出进度失败: ' + e;
+        banner.classList.add('show');
+      }
+    }
+    polling = setTimeout(poll, 500);
+  };
+  poll();
+}
+
+function appendLogLine(box, line, isError) {
+  const span = document.createElement('span');
+  if (isError) span.className = 'err';
+  span.textContent = line + '\n';
+  box.appendChild(span);
+}
+
+function showTaskResult(task) {
+  document.getElementById('progressArea').style.display = 'none';
+  document.getElementById('cancelBtn').classList.remove('is-visible');
+  document.getElementById('resultArea').style.display = 'flex';
+  const icon = document.querySelector('#resultArea .done-icon');
+  const title = document.getElementById('resultTitle');
+  if (task.status === 'done') {
+    icon.textContent = '✓';
+    icon.style.background = 'var(--green)';
+    title.textContent = '导出完成!';
+  } else if (task.status === 'cancelled') {
+    icon.textContent = '■';
+    icon.style.background = 'var(--orange)';
+    title.textContent = '导出已取消';
+  } else {
+    icon.textContent = '!';
+    icon.style.background = 'var(--red)';
+    title.textContent = '导出未完整成功';
+  }
+  document.getElementById('resultText').textContent = task.progressText;
+  lastResultPath = task.outputPath || '';
+  document.getElementById('openResultBtn').style.display = lastResultPath ? '' : 'none';
+  if (task.error) {
+    const banner = document.getElementById('errBanner');
+    banner.textContent = task.error;
+    banner.classList.add('show');
+  }
+  updateExportBtn();
+}
+
+async function cancelExport() {
+  const btn = document.getElementById('cancelBtn');
+  btn.disabled = true;
+  btn.textContent = '正在取消...';
+  try {
+    await invoke('cancel_export');
+  } catch(e) {
+    btn.disabled = false;
+    btn.textContent = '取消导出';
+    alert('取消失败: ' + e);
+  }
+}
+
+async function openResult() {
+  if (!lastResultPath) return;
+  try {
+    await invoke('open_output', { path: lastResultPath });
+  } catch(e) {
+    alert('打开输出目录失败: ' + e);
+  }
+}
+
+async function exportDiagnosticLog() {
+  if (!invoke) { alert('程序初始化失败,请重启'); return; }
+  const btn = document.getElementById('diagnosticBtn');
+  btn.disabled = true;
+  btn.textContent = '生成中...';
+  try {
+    const savedPath = await invoke('export_diagnostic_log', {
+      suggestedDir: outputPath || null
+    });
+    if (savedPath) {
+      alert('诊断日志已保存:\n' + savedPath + '\n\n请将该文件发给维护人员。');
+    }
+  } catch(e) {
+    alert('导出诊断日志失败: ' + e);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '导出诊断日志';
+  }
+}
+
+function escapeHtml(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+// 用 addEventListener 绑定所有事件(不依赖 inline onclick,避免 CSP 问题)
+document.getElementById('loginBtn').addEventListener('click', doLogin);
+document.getElementById('installBtn').addEventListener('click', async function() {
+  try {
+    await invoke('open_url', { url: 'https://open.dingtalk.com/dingtalk-cli' });
+  } catch(e) {
+    alert('打开安装教程失败: ' + e);
+  }
+});
+document.getElementById('recheckBtn').addEventListener('click', checkLoginAgain);
+document.getElementById('searchBtn').addEventListener('click', doSearch);
+document.getElementById('searchInput').addEventListener('keydown', function(e) {
+  if (e.key === 'Enter') doSearch();
+});
+document.getElementById('chooseDirBtn').addEventListener('click', chooseDir);
+document.getElementById('exportBtn').addEventListener('click', doExport);
+document.getElementById('cancelBtn').addEventListener('click', cancelExport);
+document.getElementById('diagnosticBtn').addEventListener('click', exportDiagnosticLog);
+document.getElementById('openResultBtn').addEventListener('click', openResult);
+
+init();
+</script>
+</body>
+</html>

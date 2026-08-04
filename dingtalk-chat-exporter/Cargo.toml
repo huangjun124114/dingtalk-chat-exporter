@@ -3,6 +3,7 @@ name = "dingtalk-chat-exporter"
 version = "1.0.4"
 description = "钉钉群聊记录导出器 - 选择群、自动导出消息和附件、生成聊天页面"
 authors = ["ainuoyan"]
+license = "MIT"
 edition = "2021"
 
 [features]

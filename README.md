@@ -71,3 +71,7 @@ RUSTFLAGS="-C target-feature=+crt-static --remap-path-prefix=${HOME}=/home/build
 - 取消会终止当前 `dws` 子进程；已经写入磁盘的部分目录会保留，便于排查。
 - 自包含 HTML 的体积大致等于消息内容加附件 Base64 后的总量；超大群聊可能受到浏览器单文件加载能力限制。
 - 应用主动打开的外部链接只允许 `https://`；聊天正文中的原始 `http://` / `https://` 链接仍会保留。打开目录和附件文件名均经过边界校验。
+
+## 许可证
+
+本项目使用 [MIT License](LICENSE)。

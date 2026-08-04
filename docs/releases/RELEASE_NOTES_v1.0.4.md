@@ -2,6 +2,18 @@
 
 本版本集中提升长群聊、超大附件和异常中断场景下的导出完整性，并完善诊断、跨平台兼容和界面状态。
 
+## 界面预览
+
+### 导出工具
+
+![钉钉群聊导出器界面](https://github.com/ainuoyan/dingtalk-chat-exporter/raw/main/docs/images/app-interface.png)
+
+### 导出的钉钉样式聊天记录
+
+![钉钉样式聊天记录](https://github.com/ainuoyan/dingtalk-chat-exporter/raw/main/docs/images/chat-viewer.png)
+
+预览图使用匿名演示数据，不包含真实组织、账号或聊天内容。
+
 ## 本版改进
 
 - macOS App Translocation 场景默认导出到“下载”目录，避免落入系统临时挂载路径；普通运行仍优先使用应用所在目录。

@@ -2,6 +2,26 @@
 
 基于 Tauri v2 的桌面应用，通过本机已登录的 `dws` CLI 搜索群聊、导出全部主消息与话题回复、下载附件，并生成以群聊名称命名的自包含钉钉风格 HTML。
 
+## 界面预览
+
+### 导出工具
+
+![钉钉群聊导出器界面](docs/images/app-interface.png)
+
+### 导出的钉钉样式聊天记录
+
+![钉钉样式聊天记录](docs/images/chat-viewer.png)
+
+以上截图均使用匿名演示数据，不包含真实组织、账号或聊天内容。
+
+## 下载
+
+- [macOS Apple Silicon](https://github.com/ainuoyan/dingtalk-chat-exporter/releases/latest/download/dingtalk-chat-exporter-macOS-arm64.zip)
+- [Windows 10/11 x64](https://github.com/ainuoyan/dingtalk-chat-exporter/releases/latest/download/dingtalk-chat-exporter-Windows-x64.exe)
+- [查看全部版本与 SHA-256 校验文件](https://github.com/ainuoyan/dingtalk-chat-exporter/releases)
+
+macOS 应用目前使用 ad-hoc 签名且未经过 Apple 公证，Windows 程序目前未进行 Authenticode 签名。
+
 ## 使用前提
 
 - 已安装 `dws`，并完成 `dws auth login`。

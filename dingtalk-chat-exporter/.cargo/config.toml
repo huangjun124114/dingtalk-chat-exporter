@@ -1,0 +1,5 @@
+# 交叉编译 Windows 时静态链接 C 运行库
+# 这样生成的 exe 不依赖 VCRUNTIME140.dll,干净 Windows 也能直接跑
+# (参考 dingtalk-wiki-backup 项目的经验)
+[target.x86_64-pc-windows-msvc]
+rustflags = ["-C", "target-feature=+crt-static"]

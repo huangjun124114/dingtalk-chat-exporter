@@ -490,9 +490,12 @@ pub struct GroupInfo {
 }
 
 /// 拉取群的全部普通消息和话题回复。
+/// - `start_time`：只保留 >= start_time 的消息；None 表示不限最早
+/// - `end_time`：从该时间开始向更早翻页；None 表示从当前时间开始
 pub fn fetch_all_messages(
     group_id: &str,
-    cutoff_time: Option<&str>,
+    start_time: Option<&str>,
+    end_time: Option<&str>,
     on_progress: &dyn Fn(usize, &str),
     on_diagnostic: &dyn Fn(&str),
     cancel: &AtomicBool,
@@ -508,7 +511,8 @@ pub fn fetch_all_messages(
         &mut all_messages,
         &mut seen_ids,
         &mut message_bytes,
-        cutoff_time,
+        start_time,
+        end_time,
         on_progress,
         on_diagnostic,
         cancel,
@@ -532,7 +536,8 @@ pub fn fetch_all_messages(
             &mut all_messages,
             &mut seen_ids,
             &mut message_bytes,
-            cutoff_time,
+            start_time,
+            end_time,
             on_progress,
             on_diagnostic,
             cancel,
@@ -547,12 +552,14 @@ pub fn fetch_all_messages(
     Ok(all_messages)
 }
 
-fn is_within_cutoff(create_time: &str, cutoff_time: Option<&str>) -> bool {
-    cutoff_time.is_none_or(|cutoff| create_time >= cutoff)
+/// 判断消息是否在时间范围内（>= start_time）。
+fn is_within_time_range(create_time: &str, start_time: Option<&str>) -> bool {
+    start_time.is_none_or(|start| create_time >= start)
 }
 
-fn crossed_cutoff(earliest: &str, cutoff_time: Option<&str>) -> bool {
-    cutoff_time.is_some_and(|cutoff| earliest < cutoff)
+/// 判断是否已翻越到 start_time 之前，应停止翻页。
+fn crossed_start_boundary(earliest: &str, start_time: Option<&str>) -> bool {
+    start_time.is_some_and(|start| earliest < start)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -563,12 +570,14 @@ fn fetch_message_pages(
     all_messages: &mut Vec<Message>,
     seen_ids: &mut HashSet<String>,
     message_bytes: &mut usize,
-    cutoff_time: Option<&str>,
+    start_time: Option<&str>,
+    end_time: Option<&str>,
     on_progress: &dyn Fn(usize, &str),
     on_diagnostic: &dyn Fn(&str),
     cancel: &AtomicBool,
 ) -> Result<(), String> {
-    let mut current_time = current_time_str();
+    // 翻页起始时间：有 end_time 则从 end_time 开始往更早翻，否则从当前时间开始
+    let mut current_time = end_time.map(|s| s.to_string()).unwrap_or_else(current_time_str);
     let mut page_limit = INITIAL_PAGE_LIMIT;
     for page in 1..=MAX_PAGES {
         let mut args = vec![
@@ -631,7 +640,7 @@ fn fetch_message_pages(
             if message.create_time < earliest {
                 earliest = message.create_time.clone();
             }
-            let within_cutoff = is_within_cutoff(&message.create_time, cutoff_time);
+            let within_cutoff = is_within_time_range(&message.create_time, start_time);
             if within_cutoff && seen_ids.insert(message.open_message_id.clone()) {
                 *message_bytes = message_bytes.saturating_add(message.approximate_bytes());
                 if all_messages.len() >= MAX_MESSAGES || *message_bytes > MAX_MESSAGE_BYTES {
@@ -655,11 +664,11 @@ fn fetch_message_pages(
             earliest,
             page_data.has_more
         ));
-        if crossed_cutoff(&earliest, cutoff_time) {
-            let cutoff = cutoff_time.unwrap_or_default();
+        if crossed_start_boundary(&earliest, start_time) {
+            let start = start_time.unwrap_or_default();
             on_diagnostic(&format!(
-                "{}已到达截止时间 {}，停止拉取更早消息",
-                message_kind, cutoff
+                "{}已到达开始时间 {}，停止拉取更早消息",
+                message_kind, start
             ));
             return Ok(());
         }
@@ -1026,12 +1035,12 @@ mod tests {
     #[test]
     fn cutoff_is_inclusive_and_stops_only_after_crossing_boundary() {
         let cutoff = Some("2026-07-26 12:34:56");
-        assert!(is_within_cutoff("2026-07-26 12:34:56", cutoff));
-        assert!(is_within_cutoff("2026-07-26 12:34:57", cutoff));
-        assert!(!is_within_cutoff("2026-07-26 12:34:55", cutoff));
-        assert!(!crossed_cutoff("2026-07-26 12:34:56", cutoff));
-        assert!(crossed_cutoff("2026-07-26 12:34:55", cutoff));
-        assert!(is_within_cutoff("2000-01-01 00:00:00", None));
+        assert!(is_within_time_range("2026-07-26 12:34:56", cutoff));
+        assert!(is_within_time_range("2026-07-26 12:34:57", cutoff));
+        assert!(!is_within_time_range("2026-07-26 12:34:55", cutoff));
+        assert!(!crossed_start_boundary("2026-07-26 12:34:56", cutoff));
+        assert!(crossed_start_boundary("2026-07-26 12:34:55", cutoff));
+        assert!(is_within_time_range("2000-01-01 00:00:00", None));
     }
 
     #[test]

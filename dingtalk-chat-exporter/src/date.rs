@@ -1,3 +1,6 @@
+/// 中国标准时间偏移（UTC+8），与 dws::current_time_str() 保持一致
+pub(crate) const CHINA_STANDARD_TIME_OFFSET_SECS: u64 = 8 * 3600;
+
 pub(crate) fn parse_dws_datetime(value: &str) -> Option<(i32, u32, u32, u32, u32, u32)> {
     let bytes = value.as_bytes();
     if bytes.len() != 19
@@ -43,6 +46,13 @@ fn days_in_month(year: i32, month: u32) -> u32 {
     }
 }
 
+/// 从日期时间字符串中提取年月,用于按月分文件。
+/// 输入 "2026-01-15 10:30:00" 返回 Some("202601")。
+pub(crate) fn extract_year_month(datetime: &str) -> Option<String> {
+    let (year, month, _day, _hour, _minute, _second) = parse_dws_datetime(datetime)?;
+    Some(format!("{year:04}{month:02}"))
+}
+
 pub(crate) fn epoch_days_to_ymd(days: i64) -> (i32, u32, u32) {
     let z = days + 719_468;
     let era = if z >= 0 {
@@ -77,4 +87,5 @@ mod tests {
         assert!(parse_dws_datetime("2026-02-29 12:34:56").is_none());
         assert!(parse_dws_datetime("2024-02-29 12:34:56").is_some());
     }
+
 }

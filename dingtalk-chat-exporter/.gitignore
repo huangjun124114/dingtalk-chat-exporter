@@ -1,0 +1,35 @@
+# Rust
+/target/
+/target2/
+/target_old/
+/target_ps/
+/target_v2/
+*.pdb
+*.d
+*.rmeta
+*.rlib
+
+# Build artifacts
+build_output.log
+build_output.txt
+git_diff_full.txt
+old_lib.rs
+old_viewer.rs
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Temporary files
+*.tmp
+*.bak

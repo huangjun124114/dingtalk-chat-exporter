@@ -390,7 +390,8 @@ fn build_media_map(attachments_dir: &Path) -> Result<HashMap<String, Vec<MediaFi
             .file_name()
             .filter(|name| !name.is_empty())
             .ok_or_else(|| format!("附件索引包含无效文件名: {}", record.file))?;
-        let path = attachments_dir.join(file_name);
+        // 使用相对路径（可能包含年月子目录）
+        let path = attachments_dir.join(&record.file);
         if !path.is_file() {
             return Err(format!(
                 "附件索引标记成功，但文件不存在: {}",
@@ -415,7 +416,7 @@ fn build_media_map(attachments_dir: &Path) -> Result<HashMap<String, Vec<MediaFi
 }
 
 fn color_for(name: &str) -> &'static str {
-    let hash: usize = name.chars().map(|character| character as usize).sum();
+    let hash: usize = crate::stable_hash(name) as usize;
     AVATAR_COLORS[hash % AVATAR_COLORS.len()]
 }
 
@@ -583,17 +584,22 @@ mod tests {
 
     #[test]
     fn empty_export_produces_a_valid_document() {
+        let safe_thread_name = std::thread::current()
+            .name()
+            .unwrap_or("test")
+            .replace("::", "-")
+            .replace(":", "-");
         let output = std::env::temp_dir().join(format!(
             "dingtalk-chat-exporter-empty-{}-{}.html",
             std::process::id(),
-            std::thread::current().name().unwrap_or("test")
+            safe_thread_name
         ));
         let attachments = output.with_extension("attachments");
         let cancel = AtomicBool::new(false);
         generate_html(&[], "空群", &attachments, "", &output, &cancel).unwrap();
         let html = fs::read_to_string(&output).unwrap();
         assert!(html.contains("0</b> 条消息"));
-        assert!(html.ends_with("</html>\n"));
+        assert!(html.trim_end().ends_with("</html>"));
         fs::remove_file(output).unwrap();
     }
 

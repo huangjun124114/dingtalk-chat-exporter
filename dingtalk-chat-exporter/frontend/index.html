@@ -16,6 +16,13 @@ body{font-family:"PingFang SC","Microsoft YaHei",-apple-system,BlinkMacSystemFon
 .topbar .env-status{margin-left:auto;display:flex;align-items:center;gap:8px;font-size:13px;}
 .dot{width:8px;height:8px;border-radius:50%;display:inline-block;}
 .dot.ok{background:var(--green);} .dot.err{background:var(--red);} .dot.wait{background:var(--orange);}
+/* 左右布局 */
+.layout{display:flex;flex:1;overflow:hidden;}
+/* 侧边栏 */
+.sidebar-nav{width:160px;background:#F0F2F5;border-right:1px solid var(--border);padding:12px 0;flex-shrink:0;overflow-y:auto;}
+.nav-item{padding:12px 20px;font-size:14px;cursor:pointer;transition:all .15s;border-left:3px solid transparent;color:var(--text);user-select:none;}
+.nav-item:hover{background:var(--blue-light);}
+.nav-item.active{border-left-color:var(--blue);color:var(--blue);background:var(--blue-light);font-weight:600;}
 /* 主区域 */
 .main{flex:1;overflow-y:auto;padding:20px 24px;}
 /* 步骤卡片 */
@@ -54,6 +61,12 @@ body{font-family:"PingFang SC","Microsoft YaHei",-apple-system,BlinkMacSystemFon
 /* 输出目录 */
 .output-bar{display:flex;align-items:center;gap:12px;}
 .output-bar .path{flex:1;padding:9px 14px;background:var(--bg);border:1px solid var(--border);border-radius:8px;font-size:13px;color:var(--sub);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.cutoff-input{width:100%;padding:9px 14px;border:1px solid var(--border);border-radius:8px;font-size:14px;outline:none;color:var(--text);background:var(--card);}
+.cutoff-input:focus{border-color:var(--blue);box-shadow:0 0 0 2px var(--blue-light);}
+.cutoff-input:disabled{background:var(--bg);color:var(--sub);cursor:not-allowed;}
+.field-hint{font-size:12px;color:var(--sub);margin-top:8px;line-height:1.5;}
+.time-range-group{margin-bottom:12px;}
+.time-range-group label{display:block;font-size:13px;font-weight:500;margin-bottom:6px;color:var(--text);}
 /* 进度(默认隐藏,导出时 JS 设 display:block) */
 .export-progress{display:none;margin-top:14px;}
 .progress-text{font-size:13px;color:var(--sub);margin-bottom:8px;}
@@ -69,6 +82,35 @@ body{font-family:"PingFang SC","Microsoft YaHei",-apple-system,BlinkMacSystemFon
 /* 错误提示 */
 .err-banner{display:none;background:#FFF2F0;border:1px solid #FFCCC7;color:var(--red);padding:12px 16px;border-radius:8px;font-size:13px;margin-bottom:16px;white-space:pre-wrap;}
 .err-banner.show{display:block;}
+/* 日志页 */
+.logs-toolbar{display:flex;gap:8px;margin-bottom:14px;}
+.logs-toolbar input{flex:1;padding:9px 14px;border:1px solid var(--border);border-radius:8px;font-size:14px;outline:none;}
+.logs-toolbar select{padding:9px 14px;border:1px solid var(--border);border-radius:8px;font-size:14px;outline:none;background:var(--card);}
+.log-table-wrapper{border:1px solid var(--border);border-radius:8px;overflow-x:auto;}
+.log-table{width:100%;border-collapse:collapse;font-size:13px;}
+.log-table th{background:var(--bg);padding:10px 12px;text-align:left;font-weight:600;border-bottom:1px solid var(--border);}
+.log-table td{padding:10px 12px;border-bottom:1px solid var(--border);}
+.log-table tr:last-child td{border-bottom:none;}
+.log-table tr:hover{background:var(--bg);cursor:pointer;}
+.status-badge{display:inline-block;padding:2px 8px;border-radius:4px;font-size:12px;}
+.status-badge.success{background:#E8F8E8;color:var(--green);}
+.status-badge.partial{background:#FFF7E6;color:var(--orange);}
+.status-badge.cancelled{background:var(--bg);color:var(--sub);}
+.status-badge.error{background:#FFF2F0;color:var(--red);}
+/* 设置页 */
+.setting-row{margin-bottom:12px;}
+.setting-row label{display:block;font-size:13px;font-weight:500;margin-bottom:6px;color:var(--text);}
+.setting-input{padding:9px 14px;border:1px solid var(--border);border-radius:8px;font-size:14px;outline:none;width:200px;}
+.setting-input:focus{border-color:var(--blue);box-shadow:0 0 0 2px var(--blue-light);}
+.setting-select{padding:9px 14px;border:1px solid var(--border);border-radius:8px;font-size:14px;outline:none;background:var(--card);width:100%;max-width:400px;}
+/* 关于页 */
+.about-header{text-align:center;padding:40px 20px;}
+.about-logo{width:64px;height:64px;border-radius:16px;background:var(--blue);color:#fff;display:inline-flex;align-items:center;justify-content:center;font-size:28px;font-weight:700;margin-bottom:16px;}
+.about-title{font-size:20px;font-weight:600;margin-bottom:4px;}
+.about-version{color:var(--sub);margin-bottom:20px;font-size:14px;}
+.about-desc{font-size:14px;color:var(--sub);line-height:1.8;max-width:400px;margin:0 auto 20px;}
+.about-info{font-size:13px;color:var(--sub);line-height:1.8;}
+.about-env{font-size:13px;line-height:2;}
 </style>
 </head>
 <body>
@@ -84,61 +126,200 @@ body{font-family:"PingFang SC","Microsoft YaHei",-apple-system,BlinkMacSystemFon
   </div>
 </div>
 
-<div class="main">
-  <div class="err-banner" id="errBanner"></div>
+<div class="layout">
+  <!-- 侧边栏 -->
+  <nav class="sidebar-nav">
+    <div class="nav-item active" data-view="export">📤 导出</div>
+    <div class="nav-item" data-view="logs">📋 日志</div>
+    <div class="nav-item" data-view="settings">⚙️ 设置</div>
+    <div class="nav-item" data-view="about">ℹ️ 关于</div>
+  </nav>
 
-  <!-- 环境引导(未安装或未登录时显示) -->
-  <div class="card" id="loginCard" style="display:none;border:2px solid #FF7D00;background:#FFF7E6;">
-    <div id="guideIcon" style="font-size:36px;margin-bottom:8px;">🔐</div>
-    <div style="font-size:16px;font-weight:600;margin-bottom:6px;" id="guideTitle">需要先登录钉钉</div>
-    <div style="font-size:13px;color:var(--sub);margin-bottom:14px;line-height:1.6;" id="loginHint">点击下方按钮打开终端登录 dws</div>
-    <button class="btn btn-blue" id="loginBtn">打开登录</button>
-    <button class="btn btn-outline" id="installBtn" style="display:none;margin-left:8px;">查看安装教程</button>
-    <button class="btn btn-outline" id="recheckBtn" style="display:none;margin-left:8px;">已登录,刷新检测</button>
-  </div>
+  <!-- 主内容区 -->
+  <div class="main">
+    <div class="err-banner" id="errBanner"></div>
 
-  <!-- 步骤1: 搜索群 -->
-  <div class="card">
-    <h2><span class="step-num">1</span> 搜索要导出的群</h2>
-    <div class="search-bar">
-      <input type="text" id="searchInput" placeholder="输入群名称关键词,如:技术支持">
-      <button class="btn btn-blue" id="searchBtn">搜索</button>
-    </div>
-    <div class="group-list" id="groupList">
-      <div class="empty">先搜索群,然后勾选要导出的群</div>
-    </div>
-  </div>
-
-  <!-- 步骤2: 输出目录 -->
-  <div class="card">
-    <h2><span class="step-num">2</span> 选择保存位置</h2>
-    <div class="output-bar">
-      <div class="path" id="outputPath">未选择</div>
-      <button class="btn btn-outline" id="chooseDirBtn">选择文件夹</button>
-    </div>
-  </div>
-
-  <!-- 步骤3: 导出 -->
-  <div class="card">
-    <h2><span class="step-num">3</span> 开始导出</h2>
-    <div class="export-actions">
-      <button class="btn btn-blue export-button" id="exportBtn" disabled>请先在上方搜索并勾选群</button>
-      <button class="btn btn-outline diagnostic-button" id="diagnosticBtn" title="保存自动脱敏的诊断日志；发送前请人工复核">导出诊断日志</button>
-    </div>
-    <button class="btn btn-red cancel-button" id="cancelBtn">取消导出</button>
-    <!-- 进度(导出时才显示) -->
-    <div id="progressArea" class="export-progress">
-      <div class="progress-text" id="progressText">准备中...</div>
-      <div class="log-box" id="logBox"></div>
-    </div>
-    <!-- 完成(导出完成后才显示) -->
-    <div id="resultArea" class="export-result">
-      <div class="done-icon">✓</div>
-      <div class="result-info">
-        <div class="result-title" id="resultTitle">导出完成!</div>
-        <div class="result-desc" id="resultText"></div>
+    <!-- 导出页 -->
+    <div id="exportView">
+      <!-- 环境引导(未安装或未登录时显示) -->
+      <div class="card" id="loginCard" style="display:none;border:2px solid #FF7D00;background:#FFF7E6;">
+        <div id="guideIcon" style="font-size:36px;margin-bottom:8px;">🔐</div>
+        <div style="font-size:16px;font-weight:600;margin-bottom:6px;" id="guideTitle">需要先登录钉钉</div>
+        <div style="font-size:13px;color:var(--sub);margin-bottom:14px;line-height:1.6;" id="loginHint">点击下方按钮打开终端登录 dws</div>
+        <button class="btn btn-blue" id="loginBtn">打开登录</button>
+        <button class="btn btn-outline" id="installBtn" style="display:none;margin-left:8px;">查看安装教程</button>
+        <button class="btn btn-outline" id="recheckBtn" style="display:none;margin-left:8px;">已登录,刷新检测</button>
       </div>
-      <button class="btn btn-green" id="openResultBtn">打开文件夹</button>
+
+      <!-- 步骤1: 搜索群 -->
+      <div class="card">
+        <h2><span class="step-num">1</span> 搜索要导出的群</h2>
+        <div class="search-bar">
+          <input type="text" id="searchInput" placeholder="输入群名称关键词,如:技术支持">
+          <button class="btn btn-blue" id="searchBtn">搜索</button>
+        </div>
+        <div class="group-list" id="groupList">
+          <div class="empty">先搜索群,然后勾选要导出的群</div>
+        </div>
+      </div>
+
+      <!-- 步骤2: 输出目录 -->
+      <div class="card">
+        <h2><span class="step-num">2</span> 选择保存位置</h2>
+        <div class="output-bar">
+          <div class="path" id="outputPath">未选择</div>
+          <button class="btn btn-outline" id="chooseDirBtn">选择文件夹</button>
+        </div>
+      </div>
+
+      <!-- 步骤3: 时间范围 -->
+      <div class="card">
+        <h2><span class="step-num">3</span> 设置时间范围</h2>
+        <div class="time-range-group">
+          <label>开始时间</label>
+          <input class="cutoff-input" type="datetime-local" id="startTime" step="1">
+        </div>
+        <div class="time-range-group">
+          <label>结束时间</label>
+          <input class="cutoff-input" type="datetime-local" id="endTime" step="1">
+        </div>
+        <div class="field-hint">按北京时间计算，精确到秒。都留空=导出全部记录；只填开始=从该时刻到最新；只填结束=从最早到该时刻。</div>
+      </div>
+
+      <!-- 步骤4: 导出 -->
+      <div class="card">
+        <h2><span class="step-num">4</span> 开始导出</h2>
+        <div class="export-actions">
+          <button class="btn btn-blue export-button" id="exportBtn" disabled>请先在上方搜索并勾选群</button>
+          <button class="btn btn-outline diagnostic-button" id="diagnosticBtn" title="保存自动脱敏的诊断日志；发送前请人工复核">导出诊断日志</button>
+        </div>
+        <button class="btn btn-red cancel-button" id="cancelBtn">取消导出</button>
+        <!-- 进度(导出时才显示) -->
+        <div id="progressArea" class="export-progress">
+          <div class="progress-text" id="progressText">准备中...</div>
+          <div class="log-box" id="logBox"></div>
+        </div>
+        <!-- 完成(导出完成后才显示) -->
+        <div id="resultArea" class="export-result">
+          <div class="done-icon">✓</div>
+          <div class="result-info">
+            <div class="result-title" id="resultTitle">导出完成!</div>
+            <div class="result-desc" id="resultText"></div>
+          </div>
+          <button class="btn btn-green" id="openResultBtn">打开文件夹</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 日志页 -->
+    <div id="logsView" style="display:none;">
+      <div class="card">
+        <h2>📋 导出日志</h2>
+        <div class="logs-toolbar">
+          <input type="text" id="logSearchInput" placeholder="搜索群名...">
+          <select id="logStatusFilter">
+            <option value="">全部状态</option>
+            <option value="success">成功</option>
+            <option value="partial">部分成功</option>
+            <option value="cancelled">已取消</option>
+            <option value="error">错误</option>
+          </select>
+        </div>
+        <div class="log-table-wrapper">
+          <table class="log-table" id="logTable">
+            <thead>
+              <tr>
+                <th>群名</th><th>导出时间</th><th>时间范围</th><th>消息数</th><th>附件</th><th>状态</th>
+              </tr>
+            </thead>
+            <tbody id="logTableBody">
+              <tr><td colspan="6" class="empty">尚未选择导出目录</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+      <!-- 详情面板 -->
+      <div class="card" id="logDetailCard" style="display:none;">
+        <h2>导出详情</h2>
+        <div id="logDetailContent"></div>
+        <button class="btn btn-outline" id="openLogDirBtn" style="margin-top:12px;">📂 打开群目录</button>
+      </div>
+    </div>
+
+    <!-- 设置页 -->
+    <div id="settingsView" style="display:none;">
+      <div class="card">
+        <h2>⚙️ 路径设置</h2>
+        <div class="setting-row">
+          <label>默认保存位置</label>
+          <div class="output-bar">
+            <div class="path" id="settingsOutputPath">未设置（使用程序所在目录）</div>
+            <button class="btn btn-outline" id="settingsChooseDirBtn">选择</button>
+          </div>
+          <div class="field-hint">留空则使用程序所在目录</div>
+        </div>
+      </div>
+      <div class="card">
+        <h2>⚙️ 文件命名</h2>
+        <div class="setting-row">
+          <label>群名特殊字符处理</label>
+          <select id="filenameSafeMode" class="setting-select">
+            <option value="ReplaceWithUnderscore">替换为下划线（A/B群 → A_B群）</option>
+            <option value="RemoveSilently">直接删除（A/B群 → AB群）</option>
+          </select>
+        </div>
+      </div>
+      <div class="card">
+        <h2>⚙️ 性能与超时</h2>
+        <div class="setting-row">
+          <label>dws 命令超时（秒）</label>
+          <input type="number" id="dwsTimeoutSecs" min="10" max="300" value="45" class="setting-input">
+        </div>
+        <div class="setting-row">
+          <label>附件下载超时（分钟）</label>
+          <input type="number" id="downloadTimeoutMins" min="5" max="120" value="30" class="setting-input">
+        </div>
+        <div class="setting-row">
+          <label>初始分页大小（条）</label>
+          <input type="number" id="pageLimitInitial" min="100" max="5000" value="500" class="setting-input">
+        </div>
+        <div class="setting-row">
+          <label>最大分页大小（条）</label>
+          <input type="number" id="pageLimitMax" min="1000" max="50000" value="10000" class="setting-input">
+        </div>
+      </div>
+      <div style="display:flex;gap:8px;justify-content:flex-end;">
+        <button class="btn btn-outline" id="resetSettingsBtn">恢复默认</button>
+        <button class="btn btn-blue" id="saveSettingsBtn">保存设置</button>
+      </div>
+    </div>
+
+    <!-- 关于页 -->
+    <div id="aboutView" style="display:none;">
+      <div class="card">
+        <div class="about-header">
+          <div class="about-logo">聊</div>
+          <div class="about-title">钉钉群聊导出器</div>
+          <div class="about-version"><span id="aboutVersion">v…</span></div>
+          <div class="about-desc">
+            导出钉钉群聊记录为自包含 HTML 文件<br>
+            支持消息 + 附件（图片/视频/音频/文件）
+          </div>
+          <div class="about-info">
+            Fork: huangjun124114<br>
+            原项目: github.com/ainuoyan/dingtalk-chat-exporter<br>
+            技术栈: Tauri v2 (Rust + HTML/JS)
+          </div>
+        </div>
+      </div>
+      <div class="card">
+        <h2>运行环境</h2>
+        <div class="about-env">
+          <div><b>dws 状态</b>：<span id="aboutDwsStatus">检查中...</span></div>
+          <div><b>登录用户</b>：<span id="aboutUser">-</span></div>
+          <div><b>操作系统</b>：<span id="aboutOs">-</span></div>
+        </div>
+      </div>
     </div>
   </div>
 </div>
@@ -154,14 +335,35 @@ let outputPath = '';
 let lastResultPath = '';
 let polling = null;
 let isAuthed = false;
+let currentView = 'export';
+let allExportLogs = [];
+let selectedLogEntry = null;
+let currentSettings = null;
 
-// 初始化:检查 dws 环境
+// ============ 视图切换 ============
+function switchView(view) {
+  currentView = view;
+  document.querySelectorAll('.nav-item').forEach(function(el) {
+    el.classList.remove('active');
+  });
+  var activeNav = document.querySelector('.nav-item[data-view="' + view + '"]');
+  if (activeNav) activeNav.classList.add('active');
+  document.getElementById('exportView').style.display = view === 'export' ? '' : 'none';
+  document.getElementById('logsView').style.display = view === 'logs' ? '' : 'none';
+  document.getElementById('settingsView').style.display = view === 'settings' ? '' : 'none';
+  document.getElementById('aboutView').style.display = view === 'about' ? '' : 'none';
+  if (view === 'logs') loadExportLogs();
+  if (view === 'settings') loadSettings();
+  if (view === 'about') updateAboutPage();
+}
+
+// ============ 初始化 ============
 async function init() {
   if (!invoke) { showEnvError('程序初始化失败: 无法连接后端'); return; }
   try {
     const appVersion = await invoke('get_app_version');
     if (appVersion) {
-      document.getElementById('appVersion').textContent = `v${appVersion}`;
+      document.getElementById('appVersion').textContent = 'v' + appVersion;
     }
     // 默认使用应用或 EXE 所在目录；macOS 隔离运行时回退到下载目录
     const defaultDir = await invoke('get_default_output_dir');
@@ -194,7 +396,7 @@ async function init() {
 // 未安装 dws
 function showNotInstalled() {
   isAuthed = false;
-  const dot = document.querySelector('#envStatus .dot');
+  var dot = document.querySelector('#envStatus .dot');
   dot.className = 'dot err';
   document.getElementById('envText').textContent = 'dws 未安装';
   document.getElementById('guideIcon').textContent = '📦';
@@ -210,7 +412,7 @@ function showNotInstalled() {
 // 已安装但未登录
 function showNotLoggedIn(msg) {
   isAuthed = false;
-  const dot = document.querySelector('#envStatus .dot');
+  var dot = document.querySelector('#envStatus .dot');
   dot.className = 'dot err';
   document.getElementById('envText').textContent = 'dws 未登录';
   document.getElementById('guideIcon').textContent = '🔐';
@@ -225,12 +427,12 @@ function showNotLoggedIn(msg) {
 }
 
 function updateEnvStatus(snap) {
-  const dot = document.querySelector('#envStatus .dot');
-  const text = document.getElementById('envText');
+  var dot = document.querySelector('#envStatus .dot');
+  var text = document.getElementById('envText');
   if (snap.authed && snap.authInfo) {
     isAuthed = true;
     dot.className = 'dot ok';
-    text.textContent = `${snap.authInfo.corpName} · ${snap.authInfo.userName}`;
+    text.textContent = snap.authInfo.corpName + ' · ' + snap.authInfo.userName;
   } else {
     isAuthed = false;
     dot.className = 'dot err';
@@ -240,14 +442,14 @@ function updateEnvStatus(snap) {
 
 function showEnvError(msg) {
   isAuthed = false;
-  const dot = document.querySelector('#envStatus .dot');
+  var dot = document.querySelector('#envStatus .dot');
   document.getElementById('envText').textContent = 'dws 未就绪';
   dot.className = 'dot err';
   showNotLoggedIn(msg);
 }
 
 async function doLogin() {
-  const btn = document.getElementById('loginBtn');
+  var btn = document.getElementById('loginBtn');
   btn.disabled = true; btn.textContent = '正在打开终端...';
   try {
     await invoke('login_dws');
@@ -261,7 +463,7 @@ async function doLogin() {
 }
 
 async function checkLoginAgain() {
-  const btn = document.getElementById('recheckBtn');
+  var btn = document.getElementById('recheckBtn');
   btn.disabled = true; btn.textContent = '检查中...';
   try {
     const installed = await invoke('check_dws_installed');
@@ -278,43 +480,42 @@ async function checkLoginAgain() {
   }
 }
 
-// 搜索群
+// ============ 搜索群 ============
 async function doSearch() {
-  const q = document.getElementById('searchInput').value.trim();
+  var q = document.getElementById('searchInput').value.trim();
   if (!q) return;
   if (!invoke) { alert('程序初始化失败,请重启'); return; }
-  const btn = document.getElementById('searchBtn');
+  var btn = document.getElementById('searchBtn');
   btn.disabled = true; btn.textContent = '搜索中...';
   try {
-    const groups = await invoke('search_groups', { query: q });
+    var groups = await invoke('search_groups', { query: q });
     renderGroups(groups);
   } catch(e) {
-    const errMsg = String(e);
-    document.getElementById('groupList').innerHTML = `<div class="empty" style="color:var(--red);">搜索失败: ${escapeHtml(errMsg)}</div>`;
+    var errMsg = String(e);
+    document.getElementById('groupList').innerHTML = '<div class="empty" style="color:var(--red);">搜索失败: ' + escapeHtml(errMsg) + '</div>';
     alert('搜索失败:\n\n' + errMsg);
   }
   btn.disabled = false; btn.textContent = '搜索';
 }
 
 function renderGroups(groups) {
-  const list = document.getElementById('groupList');
+  var list = document.getElementById('groupList');
   if (!groups || groups.length === 0) {
     list.innerHTML = '<div class="empty">未找到匹配的群</div>';
     return;
   }
-  list.innerHTML = groups.map((g, i) => {
-    const icon = initials(g.title || '?');
-    return `<div class="group-item" data-idx="${i}">
-      <div class="gicon">${escapeHtml(icon)}</div>
-      <div class="ginfo">
-        <div class="gname">${escapeHtml(g.title)}</div>
-        <div class="gmeta">${g.memberCount || 0} 人${g.createAt ? ' · 创建于 ' + escapeHtml(g.createAt.substring(0,10)) : ''}</div>
-      </div>
-      <div class="check"></div>
-    </div>`;
+  list.innerHTML = groups.map(function(g, i) {
+    var icon = initials(g.title || '?');
+    return '<div class="group-item" data-idx="' + i + '">' +
+      '<div class="gicon">' + escapeHtml(icon) + '</div>' +
+      '<div class="ginfo">' +
+        '<div class="gname">' + escapeHtml(g.title) + '</div>' +
+        '<div class="gmeta">' + (g.memberCount || 0) + ' 人' + (g.createAt ? ' · 创建于 ' + escapeHtml(g.createAt.substring(0,10)) : '') + '</div>' +
+      '</div>' +
+      '<div class="check"></div>' +
+    '</div>';
   }).join('');
-  // 用事件委托代替 inline onclick
-  list.querySelectorAll('.group-item').forEach(item => {
+  list.querySelectorAll('.group-item').forEach(function(item) {
     item.addEventListener('click', function() {
       toggleGroup(this, parseInt(this.dataset.idx));
     });
@@ -326,35 +527,35 @@ function renderGroups(groups) {
 
 function initials(value) {
   if (typeof Intl !== 'undefined' && Intl.Segmenter) {
-    const segments = new Intl.Segmenter('zh-CN', { granularity: 'grapheme' }).segment(String(value));
-    return Array.from(segments, item => item.segment).slice(0, 2).join('');
+    var segments = new Intl.Segmenter('zh-CN', { granularity: 'grapheme' }).segment(String(value));
+    return Array.from(segments, function(item) { return item.segment; }).slice(0, 2).join('');
   }
   return Array.from(String(value)).slice(0, 2).join('');
 }
 
 function toggleGroup(el, idx) {
-  const groups = window._searchResults || [];
-  const g = groups[idx];
+  var groups = window._searchResults || [];
+  var g = groups[idx];
   if (!g) return;
-  const existing = selectedGroups.findIndex(x => x.openConversationId === g.openConversationId);
+  var existing = selectedGroups.findIndex(function(x) { return x.openConversationId === g.openConversationId; });
   if (existing >= 0) {
     selectedGroups.splice(existing, 1);
     el.classList.remove('selected');
   } else {
-    selectedGroups.push({ title: g.title, openConversationId: g.openConversationId });
+    selectedGroups.push({ title: g.title, openConversationId: g.openConversationId, createAt: g.createAt || null });
     el.classList.add('selected');
   }
   updateExportBtn();
 }
 
 function updateExportBtn() {
-  const btn = document.getElementById('exportBtn');
+  var btn = document.getElementById('exportBtn');
   if (!isAuthed) {
     btn.disabled = true;
     btn.textContent = '请先登录并完成环境检测';
   } else if (selectedGroups.length > 0 && outputPath) {
     btn.disabled = false;
-    btn.textContent = `导出 ${selectedGroups.length} 个群`;
+    btn.textContent = '导出 ' + selectedGroups.length + ' 个群';
   } else if (selectedGroups.length > 0 && !outputPath) {
     btn.disabled = true;
     btn.textContent = '请先选择保存位置';
@@ -367,10 +568,11 @@ function updateExportBtn() {
 // 选择目录(通过 Rust 后端调系统目录选择器)
 async function chooseDir() {
   try {
-    const selected = await invoke('choose_output_dir');
+    var selected = await invoke('choose_output_dir');
     if (selected) {
       outputPath = selected;
       document.getElementById('outputPath').textContent = selected;
+      document.getElementById('settingsOutputPath').textContent = selected;
       updateExportBtn();
     }
   } catch(e) {
@@ -378,12 +580,41 @@ async function chooseDir() {
   }
 }
 
-// 导出
+// ============ 导出 ============
+function normalizeTimeValue(id) {
+  var value = document.getElementById(id).value.trim();
+  if (!value) return null;
+  if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(value)) value += ':00';
+  if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}$/.test(value)) {
+    throw new Error('时间格式无效，请填写到秒');
+  }
+  var beijingTime = new Date(value + '+08:00');
+  if (Number.isNaN(beijingTime.getTime())) throw new Error('时间无效');
+  if (beijingTime.getTime() > Date.now()) throw new Error('时间不能晚于当前北京时间');
+  return value.replace('T', ' ');
+}
+
+function validateTimeRange() {
+  var startTime = normalizeTimeValue('startTime');
+  var endTime = normalizeTimeValue('endTime');
+  if (startTime && endTime && startTime > endTime) {
+    throw new Error('开始时间不能晚于结束时间');
+  }
+  return { startTime: startTime, endTime: endTime };
+}
+
 async function doExport() {
-  const btn = document.getElementById('exportBtn');
+  var timeRange;
+  try {
+    timeRange = validateTimeRange();
+  } catch(e) {
+    alert(String(e));
+    return;
+  }
+  var btn = document.getElementById('exportBtn');
   btn.disabled = true;
   btn.textContent = '导出中...';
-  const cancelBtn = document.getElementById('cancelBtn');
+  var cancelBtn = document.getElementById('cancelBtn');
   cancelBtn.disabled = false;
   cancelBtn.textContent = '取消导出';
   cancelBtn.classList.remove('is-visible');
@@ -391,35 +622,41 @@ async function doExport() {
   document.getElementById('resultArea').style.display = 'none';
   document.getElementById('progressArea').style.display = 'block';
   document.getElementById('logBox').replaceChildren();
+  document.getElementById('startTime').disabled = true;
+  document.getElementById('endTime').disabled = true;
   try {
     await invoke('export_groups', {
       groups: selectedGroups,
-      outputRoot: outputPath
+      outputRoot: outputPath,
+      startTime: timeRange.startTime,
+      endTime: timeRange.endTime
     });
     cancelBtn.classList.add('is-visible');
     startPolling();
   } catch(e) {
     document.getElementById('progressText').textContent = '启动失败: ' + e;
     cancelBtn.classList.remove('is-visible');
+    document.getElementById('startTime').disabled = false;
+    document.getElementById('endTime').disabled = false;
     updateExportBtn();
   }
 }
 
 function startPolling() {
   if (polling) clearTimeout(polling);
-  let nextLogIndex = 0;
-  let consecutiveFailures = 0;
+  var nextLogIndex = 0;
+  var consecutiveFailures = 0;
 
-  const poll = async () => {
+  var poll = async function() {
     try {
-      const snap = await invoke('snapshot', { logFrom: nextLogIndex });
+      var snap = await invoke('snapshot', { logFrom: nextLogIndex });
       consecutiveFailures = 0;
       if (snap.task) {
         document.getElementById('progressText').textContent = snap.task.progressText;
-        const logStart = Number(snap.task.logStart || 0);
-        const logEnd = logStart + snap.task.log.length;
-        const box = document.getElementById('logBox');
-        const shouldFollowLog = box.scrollHeight - box.scrollTop - box.clientHeight < 24;
+        var logStart = Number(snap.task.logStart || 0);
+        var logEnd = logStart + snap.task.log.length;
+        var box = document.getElementById('logBox');
+        var shouldFollowLog = box.scrollHeight - box.scrollTop - box.clientHeight < 24;
         if (nextLogIndex < logStart || nextLogIndex > logEnd) {
           box.replaceChildren();
           if (nextLogIndex < logStart) {
@@ -427,13 +664,13 @@ function startPolling() {
           }
           nextLogIndex = logStart;
         }
-        snap.task.log.slice(nextLogIndex - logStart).forEach(line => {
-          appendLogLine(box, line, line.includes('失败') || line.includes('错误'));
+        snap.task.log.slice(nextLogIndex - logStart).forEach(function(line) {
+          appendLogLine(box, line, line.indexOf('失败') !== -1 || line.indexOf('错误') !== -1);
         });
         nextLogIndex = logEnd;
         if (shouldFollowLog) box.scrollTop = box.scrollHeight;
 
-        if (['done', 'error', 'cancelled'].includes(snap.task.status)) {
+        if (['done', 'error', 'cancelled'].indexOf(snap.task.status) !== -1) {
           polling = null;
           showTaskResult(snap.task);
           return;
@@ -442,7 +679,7 @@ function startPolling() {
     } catch(e) {
       consecutiveFailures += 1;
       if (consecutiveFailures >= 3) {
-        const banner = document.getElementById('errBanner');
+        var banner = document.getElementById('errBanner');
         banner.textContent = '读取导出进度失败: ' + e;
         banner.classList.add('show');
       }
@@ -453,7 +690,7 @@ function startPolling() {
 }
 
 function appendLogLine(box, line, isError) {
-  const span = document.createElement('span');
+  var span = document.createElement('span');
   if (isError) span.className = 'err';
   span.textContent = line + '\n';
   box.appendChild(span);
@@ -463,8 +700,8 @@ function showTaskResult(task) {
   document.getElementById('progressArea').style.display = 'none';
   document.getElementById('cancelBtn').classList.remove('is-visible');
   document.getElementById('resultArea').style.display = 'flex';
-  const icon = document.querySelector('#resultArea .done-icon');
-  const title = document.getElementById('resultTitle');
+  var icon = document.querySelector('#resultArea .done-icon');
+  var title = document.getElementById('resultTitle');
   if (task.status === 'done') {
     icon.textContent = '✓';
     icon.style.background = 'var(--green)';
@@ -482,15 +719,21 @@ function showTaskResult(task) {
   lastResultPath = task.outputPath || '';
   document.getElementById('openResultBtn').style.display = lastResultPath ? '' : 'none';
   if (task.error) {
-    const banner = document.getElementById('errBanner');
+    var banner = document.getElementById('errBanner');
     banner.textContent = task.error;
     banner.classList.add('show');
   }
+  document.getElementById('startTime').disabled = false;
+  document.getElementById('endTime').disabled = false;
   updateExportBtn();
+  // 导出完成后，如果当前在日志页，自动刷新
+  if (currentView === 'logs') {
+    loadExportLogs();
+  }
 }
 
 async function cancelExport() {
-  const btn = document.getElementById('cancelBtn');
+  var btn = document.getElementById('cancelBtn');
   btn.disabled = true;
   btn.textContent = '正在取消...';
   try {
@@ -513,11 +756,11 @@ async function openResult() {
 
 async function exportDiagnosticLog() {
   if (!invoke) { alert('程序初始化失败,请重启'); return; }
-  const btn = document.getElementById('diagnosticBtn');
+  var btn = document.getElementById('diagnosticBtn');
   btn.disabled = true;
   btn.textContent = '生成中...';
   try {
-    const savedPath = await invoke('export_diagnostic_log', {
+    var savedPath = await invoke('export_diagnostic_log', {
       suggestedDir: outputPath || null
     });
     if (savedPath) {
@@ -531,11 +774,240 @@ async function exportDiagnosticLog() {
   }
 }
 
+// ============ 日志页 ============
+async function loadExportLogs() {
+  if (!outputPath) {
+    document.getElementById('logTableBody').innerHTML = '<tr><td colspan="6" class="empty">请先在「导出」页面选择保存位置</td></tr>';
+    return;
+  }
+  try {
+    allExportLogs = await invoke('list_export_logs', { outputRoot: outputPath });
+    renderLogTable();
+  } catch(e) {
+    document.getElementById('logTableBody').innerHTML = '<tr><td colspan="6" class="empty" style="color:var(--red);">加载失败: ' + escapeHtml(String(e)) + '</td></tr>';
+  }
+}
+
+function renderLogTable() {
+  var search = document.getElementById('logSearchInput').value.trim().toLowerCase();
+  var statusFilter = document.getElementById('logStatusFilter').value;
+  var filtered = allExportLogs;
+  if (search) {
+    filtered = filtered.filter(function(l) {
+      return l.groupName.toLowerCase().indexOf(search) !== -1;
+    });
+  }
+  if (statusFilter) {
+    filtered = filtered.filter(function(l) { return l.status === statusFilter; });
+  }
+  var tbody = document.getElementById('logTableBody');
+  if (filtered.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="6" class="empty">暂无导出记录</td></tr>';
+    return;
+  }
+  tbody.innerHTML = filtered.map(function(log) {
+    var timeRange = formatTimeRange(log.startTime, log.endTime);
+    var statusClass = log.status;
+    var statusMap = {success:'成功',partial:'部分成功',cancelled:'已取消',error:'错误',running:'进行中'};
+    var statusLabel = statusMap[log.status] || log.status;
+    return '<tr data-log-id="' + escapeHtml(log.id) + '">' +
+      '<td>' + escapeHtml(log.groupName) + '</td>' +
+      '<td>' + escapeHtml(log.exportTime) + '</td>' +
+      '<td>' + escapeHtml(timeRange) + '</td>' +
+      '<td>' + log.messageCount.toLocaleString() + '</td>' +
+      '<td>' + log.attachmentSuccess + '/' + log.attachmentTotal + '</td>' +
+      '<td><span class="status-badge ' + statusClass + '">' + statusLabel + '</span></td>' +
+    '</tr>';
+  }).join('');
+  tbody.querySelectorAll('tr').forEach(function(row) {
+    row.addEventListener('click', function() {
+      var logId = this.dataset.logId;
+      showLogDetail(logId);
+    });
+  });
+}
+
+function formatTimeRange(startTime, endTime) {
+  if (!startTime && !endTime) return '全部';
+  if (startTime && endTime) return startTime.substring(5,10) + ' ~ ' + endTime.substring(5,10);
+  if (startTime) return startTime.substring(5,10) + ' ~ 至今';
+  return '最早 ~ ' + endTime.substring(5,10);
+}
+
+function showLogDetail(logId) {
+  var log = null;
+  for (var i = 0; i < allExportLogs.length; i++) {
+    if (allExportLogs[i].id === logId) {
+      log = allExportLogs[i];
+      break;
+    }
+  }
+  if (!log) return;
+  selectedLogEntry = log;
+  var card = document.getElementById('logDetailCard');
+  card.style.display = '';
+  var content = document.getElementById('logDetailContent');
+  var html = '<div style="display:grid;grid-template-columns:120px 1fr;gap:8px;font-size:13px;line-height:2;">' +
+    '<b>群名</b><span>' + escapeHtml(log.groupName) + '</span>' +
+    '<b>导出时间</b><span>' + escapeHtml(log.exportTime) + '</span>' +
+    '<b>时间范围</b><span>' + escapeHtml(log.startTime || '最早') + ' ~ ' + escapeHtml(log.endTime || '最新') + '</span>' +
+    '<b>实际范围</b><span>' + escapeHtml(log.actualEarliest || '无') + ' ~ ' + escapeHtml(log.actualLatest || '无') + '</span>' +
+    '<b>消息数</b><span>' + log.messageCount.toLocaleString() + ' 条</span>' +
+    '<b>附件</b><span>成功 ' + log.attachmentSuccess + ' / 失败 ' + log.attachmentFailed + ' / 共 ' + log.attachmentTotal + '</span>' +
+    '<b>状态</b><span class="status-badge ' + log.status + '">' + log.status + '</span>';
+  if (log.errorMessage) {
+    html += '<b>错误</b><span style="color:var(--red);">' + escapeHtml(log.errorMessage) + '</span>';
+  }
+  html += '</div>';
+  if (log.htmlFiles && log.htmlFiles.length > 0) {
+    html += '<div style="margin-top:14px;"><b>生成文件：</b></div><div style="margin-top:6px;">';
+    for (var j = 0; j < log.htmlFiles.length; j++) {
+      var f = log.htmlFiles[j];
+      var sizeMB = (f.fileSizeBytes / 1024 / 1024).toFixed(1);
+      html += '<div style="padding:6px 0;font-size:13px;">📄 ' + escapeHtml(f.filename) +
+        ' <span style="color:var(--sub);">(' + f.messageCount + ' 条消息, ' + f.attachmentCount + ' 个附件, ' + sizeMB + ' MB)</span></div>';
+    }
+    html += '</div>';
+  }
+  if (log.logLines && log.logLines.length > 0) {
+    html += '<div style="margin-top:14px;"><b>导出日志：</b></div>' +
+      '<div class="log-box" style="margin-top:6px;max-height:200px;">' +
+      log.logLines.map(function(l) { return escapeHtml(l); }).join('\n') +
+      '</div>';
+  }
+  content.innerHTML = html;
+}
+
+async function openLogDir() {
+  if (!selectedLogEntry || !outputPath) return;
+  try {
+    await invoke('open_output', { path: outputPath });
+  } catch(e) {
+    alert('打开目录失败: ' + e);
+  }
+}
+
+// ============ 设置页 ============
+async function loadSettings() {
+  try {
+    currentSettings = await invoke('get_settings');
+    populateSettingsForm(currentSettings);
+  } catch(e) {
+    currentSettings = {
+      defaultOutputDir: null,
+      filenameSafeMode: 'ReplaceWithUnderscore',
+      dwsTimeoutSecs: 45,
+      downloadTimeoutMins: 30,
+      pageLimitInitial: 500,
+      pageLimitMax: 10000
+    };
+    populateSettingsForm(currentSettings);
+  }
+}
+
+function populateSettingsForm(s) {
+  document.getElementById('settingsOutputPath').textContent = s.defaultOutputDir || '未设置（使用程序所在目录）';
+  document.getElementById('filenameSafeMode').value = s.filenameSafeMode || 'ReplaceWithUnderscore';
+  document.getElementById('dwsTimeoutSecs').value = s.dwsTimeoutSecs || 45;
+  document.getElementById('downloadTimeoutMins').value = s.downloadTimeoutMins || 30;
+  document.getElementById('pageLimitInitial').value = s.pageLimitInitial || 500;
+  document.getElementById('pageLimitMax').value = s.pageLimitMax || 10000;
+}
+
+function collectSettingsForm() {
+  return {
+    defaultOutputDir: null,
+    filenameSafeMode: document.getElementById('filenameSafeMode').value,
+    dwsTimeoutSecs: parseInt(document.getElementById('dwsTimeoutSecs').value) || 45,
+    downloadTimeoutMins: parseInt(document.getElementById('downloadTimeoutMins').value) || 30,
+    pageLimitInitial: parseInt(document.getElementById('pageLimitInitial').value) || 500,
+    pageLimitMax: parseInt(document.getElementById('pageLimitMax').value) || 10000
+  };
+}
+
+async function saveSettings() {
+  var settings = collectSettingsForm();
+  try {
+    await invoke('save_settings', { settings: settings });
+    alert('设置已保存');
+  } catch(e) {
+    alert('保存失败: ' + e);
+  }
+}
+
+function resetSettings() {
+  currentSettings = {
+    defaultOutputDir: null,
+    filenameSafeMode: 'ReplaceWithUnderscore',
+    dwsTimeoutSecs: 45,
+    downloadTimeoutMins: 30,
+    pageLimitInitial: 500,
+    pageLimitMax: 10000
+  };
+  populateSettingsForm(currentSettings);
+}
+
+async function settingsChooseDir() {
+  try {
+    var selected = await invoke('choose_output_dir');
+    if (selected) {
+      outputPath = selected;
+      document.getElementById('outputPath').textContent = selected;
+      document.getElementById('settingsOutputPath').textContent = selected;
+      updateExportBtn();
+    }
+  } catch(e) {
+    alert('选择目录失败: ' + e);
+  }
+}
+
+// ============ 关于页 ============
+function updateAboutPage() {
+  var appVer = document.getElementById('appVersion').textContent;
+  document.getElementById('aboutVersion').textContent = appVer;
+  document.getElementById('aboutDwsStatus').textContent = isAuthed ? '✅ 已就绪' : '❌ 未就绪';
+  var envText = document.getElementById('envText').textContent;
+  document.getElementById('aboutUser').textContent = envText;
+
+  // 尝试从后端获取详细诊断信息
+  invoke('get_diagnostics_info').then(function(info) {
+    if (info && info.dws) {
+      var dwsStatus = info.dws.authenticated ? '✅ 已就绪' : '❌ 未就绪';
+      document.getElementById('aboutDwsStatus').textContent = dwsStatus;
+      if (info.dws.userName && info.dws.corpName) {
+        document.getElementById('aboutUser').textContent = info.dws.corpName + ' · ' + info.dws.userName;
+      }
+    }
+    if (info && info.os) {
+      document.getElementById('aboutOs').textContent = info.os + ' (' + info.arch + ')';
+    }
+  }).catch(function(err) {
+    // 降级到本地信息
+    var ua = navigator.userAgent;
+    if (ua.indexOf('Windows') !== -1) {
+      document.getElementById('aboutOs').textContent = 'Windows';
+    } else if (ua.indexOf('Mac') !== -1) {
+      document.getElementById('aboutOs').textContent = 'macOS';
+    } else {
+      document.getElementById('aboutOs').textContent = 'Unknown';
+    }
+  });
+}
+
+// ============ 工具函数 ============
 function escapeHtml(s) {
   return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
 
-// 用 addEventListener 绑定所有事件(不依赖 inline onclick,避免 CSP 问题)
+// ============ 事件绑定 ============
+// 侧边栏
+document.querySelectorAll('.nav-item').forEach(function(item) {
+  item.addEventListener('click', function() {
+    switchView(this.dataset.view);
+  });
+});
+
+// 导出页
 document.getElementById('loginBtn').addEventListener('click', doLogin);
 document.getElementById('installBtn').addEventListener('click', async function() {
   try {
@@ -554,6 +1026,16 @@ document.getElementById('exportBtn').addEventListener('click', doExport);
 document.getElementById('cancelBtn').addEventListener('click', cancelExport);
 document.getElementById('diagnosticBtn').addEventListener('click', exportDiagnosticLog);
 document.getElementById('openResultBtn').addEventListener('click', openResult);
+
+// 日志页
+document.getElementById('logSearchInput').addEventListener('input', renderLogTable);
+document.getElementById('logStatusFilter').addEventListener('change', renderLogTable);
+document.getElementById('openLogDirBtn').addEventListener('click', openLogDir);
+
+// 设置页
+document.getElementById('settingsChooseDirBtn').addEventListener('click', settingsChooseDir);
+document.getElementById('saveSettingsBtn').addEventListener('click', saveSettings);
+document.getElementById('resetSettingsBtn').addEventListener('click', resetSettings);
 
 init();
 </script>

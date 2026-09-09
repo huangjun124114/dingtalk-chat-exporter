@@ -1,0 +1,8 @@
+# Keep builds launched from the repository root in the existing target directory.
+[build]
+target-dir = "dingtalk-chat-exporter/target"
+
+# Statically link the Windows C runtime so the packaged executable does not
+# require VCRUNTIME140.dll on the target machine.
+[target.x86_64-pc-windows-msvc]
+rustflags = ["-C", "target-feature=+crt-static"]

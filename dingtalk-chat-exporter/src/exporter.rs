@@ -129,12 +129,7 @@ pub trait ArchiveStrategy: Send + Sync {
     fn prepare_root_index(&self, group_dir: &Path) -> Result<(), String>;
 
     /// HTML 文件名（PerRun 处理重名加序号；ScheduledGroup 固定名覆盖重建）
-    fn html_filename(
-        &self,
-        group_title: &str,
-        year_month: &str,
-        group_dir: &Path,
-    ) -> String;
+    fn html_filename(&self, group_title: &str, year_month: &str, group_dir: &Path) -> String;
 }
 
 /// 现状手动导出存档：每次运行新建独立目录
@@ -177,12 +172,7 @@ impl ArchiveStrategy for PerRunArchive {
         Ok(())
     }
 
-    fn html_filename(
-        &self,
-        group_title: &str,
-        year_month: &str,
-        group_dir: &Path,
-    ) -> String {
+    fn html_filename(&self, group_title: &str, year_month: &str, group_dir: &Path) -> String {
         resolve_html_filename(group_title, year_month, group_dir)
     }
 }
@@ -193,7 +183,10 @@ pub struct ScheduledGroupArchive;
 impl ScheduledGroupArchive {
     /// 批次时间戳格式：MMDD_HHMMSS → 批次目录名 YYYYMMDD_HHMMSS（跨月排序友好）
     fn batch_dir_name(batch_stamp: &str) -> String {
-        batch_stamp.replace('-', "").replace(' ', "_").replace(':', "")
+        batch_stamp
+            .replace('-', "")
+            .replace(' ', "_")
+            .replace(':', "")
     }
 }
 
@@ -286,10 +279,13 @@ impl ArchiveStrategy for ScheduledGroupArchive {
                 if !path.exists() {
                     continue;
                 }
-                let content = fs::read_to_string(&path)
-                    .map_err(|error| format!("读取批次附件索引失败 {}: {}", path.display(), error))?;
-                let records: Vec<serde_json::Value> = serde_json::from_str(&content)
-                    .map_err(|error| format!("解析批次附件索引失败 {}: {}", path.display(), error))?;
+                let content = fs::read_to_string(&path).map_err(|error| {
+                    format!("读取批次附件索引失败 {}: {}", path.display(), error)
+                })?;
+                let records: Vec<serde_json::Value> =
+                    serde_json::from_str(&content).map_err(|error| {
+                        format!("解析批次附件索引失败 {}: {}", path.display(), error)
+                    })?;
                 for record in records {
                     // 去重键：mediaId + file；同一附件重复拉取时保留 status=ok 的记录
                     let key = format!(
@@ -300,16 +296,13 @@ impl ArchiveStrategy for ScheduledGroupArchive {
                     if seen_keys.contains(&key) {
                         // 已存在记录：若新记录成功而旧记录失败，替换之
                         if record.get("status").and_then(|v| v.as_str()) == Some("ok") {
-                            if let Some(existing) = merged
-                                .iter_mut()
-                                .find(|item| {
-                                    format!(
-                                        "{}|{}",
-                                        item.get("mediaId").and_then(|v| v.as_str()).unwrap_or(""),
-                                        item.get("file").and_then(|v| v.as_str()).unwrap_or("")
-                                    ) == key
-                                })
-                            {
+                            if let Some(existing) = merged.iter_mut().find(|item| {
+                                format!(
+                                    "{}|{}",
+                                    item.get("mediaId").and_then(|v| v.as_str()).unwrap_or(""),
+                                    item.get("file").and_then(|v| v.as_str()).unwrap_or("")
+                                ) == key
+                            }) {
                                 if existing.get("status").and_then(|v| v.as_str()) != Some("ok") {
                                     *existing = record;
                                 }
@@ -325,12 +318,7 @@ impl ArchiveStrategy for ScheduledGroupArchive {
         write_json(&group_dir.join("attachments_index.json"), &merged)
     }
 
-    fn html_filename(
-        &self,
-        group_title: &str,
-        year_month: &str,
-        _group_dir: &Path,
-    ) -> String {
+    fn html_filename(&self, group_title: &str, year_month: &str, _group_dir: &Path) -> String {
         // 固定文件名：合并重建时直接覆盖同名月度 HTML
         format!("{}-{}.html", sanitize_filename(group_title), year_month)
     }
@@ -350,20 +338,15 @@ pub struct ExportJob {
 }
 
 /// 执行导出作业（核心实现，手动/定时共用）
-pub fn run_job(
-    job: &ExportJob,
-    progress: &dyn ExportProgress,
-) -> JobOutcome {
+pub fn run_job(job: &ExportJob, progress: &dyn ExportProgress) -> JobOutcome {
     let root = PathBuf::from(&job.output_root);
     let mut outcome = JobOutcome::default();
 
     if let Err(error) = fs::create_dir_all(&root) {
         outcome.status = "error".into();
-        outcome.all_errors.push(format!(
-            "创建输出目录 {} 失败: {}",
-            root.display(),
-            error
-        ));
+        outcome
+            .all_errors
+            .push(format!("创建输出目录 {} 失败: {}", root.display(), error));
         return outcome;
     }
 
@@ -386,7 +369,9 @@ pub fn run_job(
 
         match export_single_group(job, group, progress) {
             Ok(group_outcome) => {
-                outcome.all_errors.extend(group_outcome.errors.iter().cloned());
+                outcome
+                    .all_errors
+                    .extend(group_outcome.errors.iter().cloned());
                 outcome.groups.push(group_outcome);
             }
             Err(GroupError::Cancelled) => break,
@@ -419,11 +404,9 @@ fn export_single_group(
 ) -> Result<GroupOutcome, GroupError> {
     let mut errors: Vec<String> = Vec::new();
     let batch_stamp = dws::current_time_str();
-    let group_dir = job.archive.group_dir(
-        Path::new(&job.output_root),
-        group,
-        &batch_stamp,
-    );
+    let group_dir = job
+        .archive
+        .group_dir(Path::new(&job.output_root), group, &batch_stamp);
 
     // ScheduledGroup 模式：消息与索引落盘到批次子目录
     let (messages_path, index_path, attachment_dir) =
@@ -465,11 +448,17 @@ fn export_single_group(
     // 时间范围提示
     match &job.start_time {
         Some(start) => progress.log(&format!("群「{}」开始时间: {}", group.title, start)),
-        None => progress.log(&format!("群「{}」未设置开始时间，从最早消息开始", group.title)),
+        None => progress.log(&format!(
+            "群「{}」未设置开始时间，从最早消息开始",
+            group.title
+        )),
     }
     match &job.end_time {
         Some(end) => progress.log(&format!("群「{}」结束时间: {}", group.title, end)),
-        None => progress.log(&format!("群「{}」未设置结束时间，到最新消息结束", group.title)),
+        None => progress.log(&format!(
+            "群「{}」未设置结束时间，到最新消息结束",
+            group.title
+        )),
     }
 
     // 1. 拉取消息
@@ -638,7 +627,10 @@ fn export_single_group(
         .filter(|attachment| attachment["status"] == "ok")
         .count();
     if reused_count > 0 {
-        progress.log(&format!("附件增量复用: {} 个已存在，跳过下载", reused_count));
+        progress.log(&format!(
+            "附件增量复用: {} 个已存在，跳过下载",
+            reused_count
+        ));
     }
     progress.log(&format!(
         "附件下载完成: 成功 {}/{}",
@@ -664,7 +656,10 @@ fn export_single_group(
     let mut messages_by_month: BTreeMap<String, Vec<&Message>> = BTreeMap::new();
     for message in &html_messages {
         let year_month = extract_year_month(&message.create_time);
-        messages_by_month.entry(year_month).or_default().push(message);
+        messages_by_month
+            .entry(year_month)
+            .or_default()
+            .push(message);
     }
     progress.log(&format!(
         "HTML 渲染范围: {} 条消息，分布在 {} 个月份",
@@ -680,18 +675,25 @@ fn export_single_group(
         progress.progress(format!(
             "生成 {} 年 {} 月聊天记录...",
             &year_month[0..4.min(year_month.len())],
-            if year_month.len() >= 6 { &year_month[4..6] } else { "?" }
+            if year_month.len() >= 6 {
+                &year_month[4..6]
+            } else {
+                "?"
+            }
         ));
         let month_attachment_count: usize = month_messages
             .iter()
             .map(|message| media::extract_media_ids(&message.content).len())
             .sum();
-        let html_file_name =
-            job.archive
-                .html_filename(&group.title, year_month, &group_dir);
+        let html_file_name = job
+            .archive
+            .html_filename(&group.title, year_month, &group_dir);
         let html_path = group_dir.join(&html_file_name);
         match viewer::generate_html(
-            &month_messages.iter().map(|message| (*message).clone()).collect::<Vec<_>>(),
+            &month_messages
+                .iter()
+                .map(|message| (*message).clone())
+                .collect::<Vec<_>>(),
             &group.title,
             &attachment_dir,
             &job.self_name,
@@ -803,7 +805,10 @@ fn export_single_group(
 /// 把 "yyyy-MM-dd HH:mm:ss" 拆成 ("MMDD", "HHMMSS")
 fn split_batch_stamp(stamp: &str) -> (String, String) {
     if stamp.len() >= 19 {
-        (stamp[5..10].replace('-', ""), stamp[11..19].replace(':', ""))
+        (
+            stamp[5..10].replace('-', ""),
+            stamp[11..19].replace(':', ""),
+        )
     } else {
         ("0000".to_string(), "000000".to_string())
     }
@@ -933,7 +938,11 @@ pub(crate) fn extract_year_month(datetime: &str) -> String {
 }
 
 /// 生成 HTML 文件名，处理重名：群名-YYYYMM.html，重名加序号 -01, -02...
-pub(crate) fn resolve_html_filename(group_title: &str, year_month: &str, group_dir: &Path) -> String {
+pub(crate) fn resolve_html_filename(
+    group_title: &str,
+    year_month: &str,
+    group_dir: &Path,
+) -> String {
     let safe_title = sanitize_filename(group_title);
     let base_filename = format!("{}-{}.html", safe_title, year_month);
     if !group_dir.join(&base_filename).exists() {
@@ -999,10 +1008,7 @@ mod tests {
             create_at: None,
         };
         let dir = archive.group_dir(Path::new("D:/exports"), &group, "2026-01-15 10:30:00");
-        assert_eq!(
-            dir,
-            PathBuf::from("D:/exports").join("测试群_0115_103000")
-        );
+        assert_eq!(dir, PathBuf::from("D:/exports").join("测试群_0115_103000"));
     }
 
     #[test]
@@ -1016,7 +1022,7 @@ mod tests {
         let first = archive.group_dir(Path::new("D:/exports"), &group, "2026-01-15 10:30:00");
         let second = archive.group_dir(Path::new("D:/exports"), &group, "2026-02-20 08:00:00");
         assert_eq!(first, second); // 固定目录
-        // 不同群 ID → 不同目录
+                                   // 不同群 ID → 不同目录
         let other = GroupExportRequest {
             title: "测试群".into(),
             open_conversation_id: "cid_y".into(),
@@ -1056,21 +1062,32 @@ mod tests {
             open_conv_thread_id: None,
         };
         // 批次A: m1, m2；批次B: m2(重复), m3；当前批次: m3(重复), m4
-        write_json(&batch_a.join("messages.json"), &vec![
-            message("m1", "2026-01-01 10:00:00"),
-            message("m2", "2026-01-15 10:00:00"),
-        ]).unwrap();
-        write_json(&batch_b.join("messages.json"), &vec![
-            message("m2", "2026-01-15 10:00:00"),
-            message("m3", "2026-02-01 10:00:00"),
-        ]).unwrap();
+        write_json(
+            &batch_a.join("messages.json"),
+            &vec![
+                message("m1", "2026-01-01 10:00:00"),
+                message("m2", "2026-01-15 10:00:00"),
+            ],
+        )
+        .unwrap();
+        write_json(
+            &batch_b.join("messages.json"),
+            &vec![
+                message("m2", "2026-01-15 10:00:00"),
+                message("m3", "2026-02-01 10:00:00"),
+            ],
+        )
+        .unwrap();
 
         let archive = ScheduledGroupArchive;
         let merged = archive
-            .messages_for_html(&temp_dir, &[
-                message("m3", "2026-02-01 10:00:00"),
-                message("m4", "2026-02-15 10:00:00"),
-            ])
+            .messages_for_html(
+                &temp_dir,
+                &[
+                    message("m3", "2026-02-01 10:00:00"),
+                    message("m4", "2026-02-15 10:00:00"),
+                ],
+            )
             .unwrap();
         assert_eq!(merged.len(), 4);
         let ids: Vec<&str> = merged
@@ -1098,10 +1115,14 @@ mod tests {
         write_json(&batch_a.join("attachments_index.json"), &vec![
             serde_json::json!({ "mediaId": "media1", "file": "202601/a.jpg", "status": "fail" }),
         ]).unwrap();
-        write_json(&batch_b.join("attachments_index.json"), &vec![
-            serde_json::json!({ "mediaId": "media1", "file": "202601/a.jpg", "status": "ok" }),
-            serde_json::json!({ "mediaId": "media2", "file": "202602/b.jpg", "status": "ok" }),
-        ]).unwrap();
+        write_json(
+            &batch_b.join("attachments_index.json"),
+            &vec![
+                serde_json::json!({ "mediaId": "media1", "file": "202601/a.jpg", "status": "ok" }),
+                serde_json::json!({ "mediaId": "media2", "file": "202602/b.jpg", "status": "ok" }),
+            ],
+        )
+        .unwrap();
 
         let archive = ScheduledGroupArchive;
         archive.prepare_root_index(&temp_dir).unwrap();
@@ -1141,8 +1162,14 @@ mod tests {
             resolve_html_filename("研发/值班:日报*?", "202601", &temp_dir),
             "研发值班日报-202601.html"
         );
-        assert_eq!(resolve_html_filename("CON", "202601", &temp_dir), "_CON-202601.html");
-        assert_eq!(resolve_html_filename("... ", "202601", &temp_dir), "群聊-202601.html");
+        assert_eq!(
+            resolve_html_filename("CON", "202601", &temp_dir),
+            "_CON-202601.html"
+        );
+        assert_eq!(
+            resolve_html_filename("... ", "202601", &temp_dir),
+            "群聊-202601.html"
+        );
     }
 
     #[test]
@@ -1162,7 +1189,9 @@ mod tests {
     fn trigger_type_and_schedule_id() {
         assert_eq!(Trigger::Manual.trigger_type(), "manual");
         assert_eq!(Trigger::Manual.schedule_id(), None);
-        let scheduled = Trigger::Scheduled { schedule_id: "sch_1".into() };
+        let scheduled = Trigger::Scheduled {
+            schedule_id: "sch_1".into(),
+        };
         assert_eq!(scheduled.trigger_type(), "scheduled");
         assert_eq!(scheduled.schedule_id(), Some("sch_1"));
     }

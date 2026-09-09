@@ -784,6 +784,164 @@ fn get_diagnostics_info() -> Result<serde_json::Value, String> {
     }))
 }
 
+// ===== 定时导出任务命令 =====
+
+/// 定时任务视图：在持久化模型基础上附加自然语言描述（由后端 describe 统一生成，避免前端重复实现）
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ScheduleView {
+    #[serde(flatten)]
+    schedule: schedule::Schedule,
+    description: String,
+}
+
+impl ScheduleView {
+    fn from(schedule: schedule::Schedule) -> Self {
+        let description = schedule.schedule.describe();
+        ScheduleView { schedule, description }
+    }
+}
+
+#[tauri::command]
+fn list_schedules() -> Result<Vec<ScheduleView>, String> {
+    let _guard = scheduler::store_guard();
+    let store = schedule::load_store()?;
+    Ok(store.schedules.into_iter().map(ScheduleView::from).collect())
+}
+
+#[tauri::command]
+fn get_schedule_runs(id: String) -> Result<Vec<schedule::ScheduleRun>, String> {
+    let _guard = scheduler::store_guard();
+    let store = schedule::load_store()?;
+    let schedule = store.find(&id).ok_or("定时任务不存在")?;
+    Ok(schedule.runs.clone())
+}
+
+/// 预览未来 3 次触发时间（尊重调度开始时间下限）
+#[tauri::command]
+fn preview_schedule(config: schedule::ScheduleConfig) -> Result<Vec<String>, String> {
+    let cron = config.validate()?;
+    let now = dws::current_time_str();
+    let first =
+        schedule::compute_next_run(&config, &now).ok_or("cron 表达式无有效触发时间")?;
+    let mut result = vec![first.clone()];
+    let mut cursor = first;
+    for _ in 0..2 {
+        match cron.next_after(&cursor) {
+            Some(next) => {
+                cursor = next.clone();
+                result.push(next);
+            }
+            None => break,
+        }
+    }
+    Ok(result)
+}
+
+/// 仅校验（cron 合法性 + 同群冲突），不落盘；界面创建时即时提示
+#[tauri::command]
+fn validate_schedule(schedule: schedule::Schedule) -> Result<(), String> {
+    let _guard = scheduler::store_guard();
+    let store = schedule::load_store()?;
+    store.validate(&schedule)
+}
+
+/// 保存（新建/编辑）任务：校验 → 保留既有水位线与运行历史 → 重算下次触发 → 落盘
+#[tauri::command]
+fn save_schedule(mut schedule: schedule::Schedule) -> Result<ScheduleView, String> {
+    let _guard = scheduler::store_guard();
+    let mut store = schedule::load_store()?;
+
+    let is_new = schedule.id.trim().is_empty();
+    if is_new {
+        schedule.id = schedule::generate_schedule_id(&dws::current_time_str());
+    }
+
+    // 校验：cron + 时间格式 + 同群冲突（编辑自身不算冲突）
+    store.validate(&schedule)?;
+
+    // 编辑既有任务：保留运行态字段（水位线、运行历史、计数），只更新配置
+    if let Some(existing) = store.find(&schedule.id) {
+        schedule.last_success_at = existing.last_success_at.clone();
+        schedule.last_run_at = existing.last_run_at.clone();
+        schedule.run_count = existing.run_count;
+        schedule.runs = existing.runs.clone();
+    }
+
+    // 配置可能已变更，统一从当前时间重算下次触发
+    let now = dws::current_time_str();
+    schedule.next_run_at = schedule::compute_next_run(&schedule.schedule, &now);
+
+    store.upsert(schedule.clone());
+    schedule::save_store(&store)?;
+    Ok(ScheduleView::from(schedule))
+}
+
+#[tauri::command]
+fn delete_schedule(id: String) -> Result<(), String> {
+    let _guard = scheduler::store_guard();
+    let mut store = schedule::load_store()?;
+    if !store.remove(&id) {
+        return Err("定时任务不存在".into());
+    }
+    schedule::save_store(&store)
+}
+
+#[tauri::command]
+fn toggle_schedule(id: String, enabled: bool) -> Result<(), String> {
+    let _guard = scheduler::store_guard();
+    let mut store = schedule::load_store()?;
+    let now = dws::current_time_str();
+    let schedule = store.find_mut(&id).ok_or("定时任务不存在")?;
+    schedule.enabled = enabled;
+    if enabled {
+        schedule.next_run_at = schedule::compute_next_run(&schedule.schedule, &now);
+    }
+    schedule::save_store(&store)
+}
+
+/// 立即运行一次（不受 enabled / next_run_at 限制），区间从水位线到当前时刻。
+/// 同步预检任务存在与忙闲，随后在独立线程执行（与手动导出共享任务槽）。
+#[tauri::command]
+fn run_schedule_now(state: State<'_, AppState>, id: String) -> Result<(), String> {
+    {
+        let _guard = scheduler::store_guard();
+        let store = schedule::load_store()?;
+        if store.find(&id).is_none() {
+            return Err("定时任务不存在".into());
+        }
+    }
+    {
+        let inner = state.inner.lock().map_err(lock_error)?;
+        if inner
+            .task
+            .as_ref()
+            .is_some_and(|task| task.status == "running")
+        {
+            return Err("已有导出任务正在运行".into());
+        }
+    }
+    let inner = state.inner.clone();
+    let cancel = state.cancel_requested.clone();
+    std::thread::spawn(move || {
+        if let Err(error) = scheduler::run_now(&inner, &cancel, &id) {
+            // 预检后到执行前的竞态（如手动导出抢占）：显式写入错误任务状态供界面反馈
+            if let Ok(mut guard) = inner.lock() {
+                guard.task = Some(TaskState {
+                    kind: "schedule".into(),
+                    status: "error".into(),
+                    progress_text: "定时任务运行失败".into(),
+                    log: Vec::new(),
+                    log_start: 0,
+                    output_path: None,
+                    error: Some(error),
+                });
+            }
+        }
+    });
+    Ok(())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let app_state = AppState::default();
@@ -811,6 +969,14 @@ pub fn run() {
             save_settings,
             list_export_logs,
             get_diagnostics_info,
+            list_schedules,
+            get_schedule_runs,
+            preview_schedule,
+            validate_schedule,
+            save_schedule,
+            delete_schedule,
+            toggle_schedule,
+            run_schedule_now,
         ])
         .run(tauri::generate_context!())
         .expect("error while building tauri application");

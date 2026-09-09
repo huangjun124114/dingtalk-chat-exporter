@@ -79,8 +79,7 @@ pub fn append_export_log(group_dir: &Path, log: &ExportLogEntry) -> Result<(), S
     let mut logs = if log_path.exists() {
         let content = fs::read_to_string(&log_path)
             .map_err(|error| format!("读取导出日志失败: {}", error))?;
-        serde_json::from_str::<Vec<ExportLogEntry>>(&content)
-            .unwrap_or_default()
+        serde_json::from_str::<Vec<ExportLogEntry>>(&content).unwrap_or_default()
     } else {
         Vec::new()
     };
@@ -89,8 +88,7 @@ pub fn append_export_log(group_dir: &Path, log: &ExportLogEntry) -> Result<(), S
         .map_err(|error| format!("序列化导出日志失败: {}", error))?;
     // 原子写入：先写 .tmp，再 rename
     let tmp_path = log_path.with_extension("json.tmp");
-    fs::write(&tmp_path, &json)
-        .map_err(|error| format!("写入导出日志临时文件失败: {}", error))?;
+    fs::write(&tmp_path, &json).map_err(|error| format!("写入导出日志临时文件失败: {}", error))?;
     fs::rename(&tmp_path, &log_path)
         .map_err(|error| format!("重命名导出日志临时文件失败: {}", error))
 }
@@ -101,10 +99,10 @@ pub fn read_export_logs(group_dir: &Path) -> Result<Vec<ExportLogEntry>, String>
     if !log_path.exists() {
         return Ok(Vec::new());
     }
-    let content = fs::read_to_string(&log_path)
-        .map_err(|error| format!("读取导出日志失败: {}", error))?;
-    let logs: Vec<ExportLogEntry> = serde_json::from_str(&content)
-        .map_err(|error| format!("解析导出日志失败: {}", error))?;
+    let content =
+        fs::read_to_string(&log_path).map_err(|error| format!("读取导出日志失败: {}", error))?;
+    let logs: Vec<ExportLogEntry> =
+        serde_json::from_str(&content).map_err(|error| format!("解析导出日志失败: {}", error))?;
     Ok(logs)
 }
 
@@ -117,8 +115,8 @@ pub fn list_all_export_logs(output_root: &Path) -> Result<Vec<ExportLogEntry>, S
         return Ok(all_logs);
     }
 
-    let entries = fs::read_dir(output_root)
-        .map_err(|error| format!("读取输出根目录失败: {}", error))?;
+    let entries =
+        fs::read_dir(output_root).map_err(|error| format!("读取输出根目录失败: {}", error))?;
 
     for entry in entries {
         let entry = entry.map_err(|error| format!("读取目录项失败: {}", error))?;
@@ -235,10 +233,8 @@ mod tests {
 
     #[test]
     fn append_and_read_export_logs_round_trip() {
-        let temp_dir = std::env::temp_dir().join(format!(
-            "dingtalk-export-log-test-{}",
-            std::process::id()
-        ));
+        let temp_dir =
+            std::env::temp_dir().join(format!("dingtalk-export-log-test-{}", std::process::id()));
         let _ = fs::remove_dir_all(&temp_dir);
         fs::create_dir_all(&temp_dir).unwrap();
 

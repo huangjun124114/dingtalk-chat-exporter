@@ -51,7 +51,12 @@ impl FieldSet {
     }
 }
 
-fn parse_field(field: &str, min: u32, max: u32, allow_weekday_names: bool) -> Result<FieldSet, String> {
+fn parse_field(
+    field: &str,
+    min: u32,
+    max: u32,
+    allow_weekday_names: bool,
+) -> Result<FieldSet, String> {
     let mut bits: u128 = 0;
     let mut wildcard = false;
     if field.trim().is_empty() {
@@ -68,9 +73,7 @@ fn parse_field(field: &str, min: u32, max: u32, allow_weekday_names: bool) -> Re
         };
         let step: u32 = match step_part {
             Some(step) => {
-                let value: u32 = step
-                    .parse()
-                    .map_err(|_| format!("cron 步长无效: {part}"))?;
+                let value: u32 = step.parse().map_err(|_| format!("cron 步长无效: {part}"))?;
                 if value == 0 {
                     return Err(format!("cron 步长不能为 0: {part}"));
                 }

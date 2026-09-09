@@ -80,6 +80,38 @@ pub fn tick(inner: &Arc<Mutex<AppInner>>, cancel_requested: &Arc<AtomicBool>) {
     finalize(&due.schedule.id, &run);
 }
 
+/// 立即手动运行一次指定任务（不受 next_run_at / enabled 限制）。
+/// 复用 execute + finalize：占用任务槽 → 导出 → 写运行记录与水位线。
+/// 返回本次运行状态（success/partial/error/skipped）；忙或任务不存在时返回 Err。
+/// 供 run_schedule_now 命令在独立线程中调用。
+pub fn run_now(
+    inner: &Arc<Mutex<AppInner>>,
+    cancel_requested: &Arc<AtomicBool>,
+    schedule_id: &str,
+) -> Result<String, String> {
+    let schedule = {
+        let _guard = store_guard();
+        let store = schedule::load_store()?;
+        store
+            .find(schedule_id)
+            .cloned()
+            .ok_or_else(|| "定时任务不存在".to_string())?
+    };
+    if task_slot_busy(inner) {
+        return Err("已有导出任务正在运行，请稍后再试".into());
+    }
+    // 手动"立即运行"：区间终点 = 当前时刻
+    let trigger_time = dws::current_time_str();
+    let now = trigger_time.clone();
+    let run = execute(inner, cancel_requested, &schedule, &trigger_time, &now);
+    let status = run.status.clone();
+    {
+        let _guard = store_guard();
+        finalize(&schedule.id, &run);
+    }
+    Ok(status)
+}
+
 struct DueTrigger {
     schedule: Schedule,
     trigger_time: String,

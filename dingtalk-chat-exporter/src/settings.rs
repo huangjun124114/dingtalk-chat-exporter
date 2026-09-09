@@ -81,10 +81,10 @@ pub fn load_settings() -> Result<AppSettings, String> {
     if !path.exists() {
         return Ok(AppSettings::default());
     }
-    let content = fs::read_to_string(&path)
-        .map_err(|error| format!("读取设置文件失败: {}", error))?;
-    let settings: AppSettings = serde_json::from_str(&content)
-        .map_err(|error| format!("解析设置文件失败: {}", error))?;
+    let content =
+        fs::read_to_string(&path).map_err(|error| format!("读取设置文件失败: {}", error))?;
+    let settings: AppSettings =
+        serde_json::from_str(&content).map_err(|error| format!("解析设置文件失败: {}", error))?;
     Ok(settings)
 }
 
@@ -96,15 +96,13 @@ pub fn save_settings(settings: &AppSettings) -> Result<(), String> {
     // 确保配置目录存在
     if let Some(parent) = path.parent() {
         if !parent.exists() {
-            fs::create_dir_all(parent)
-                .map_err(|error| format!("创建配置目录失败: {}", error))?;
+            fs::create_dir_all(parent).map_err(|error| format!("创建配置目录失败: {}", error))?;
         }
     }
 
     let json = serde_json::to_string_pretty(settings)
         .map_err(|error| format!("序列化设置失败: {}", error))?;
-    fs::write(&path, json)
-        .map_err(|error| format!("写入设置文件失败: {}", error))
+    fs::write(&path, json).map_err(|error| format!("写入设置文件失败: {}", error))
 }
 
 #[cfg(test)]
@@ -116,7 +114,10 @@ mod tests {
     fn default_settings_have_expected_values() {
         let settings = AppSettings::default();
         assert!(settings.default_output_dir.is_none());
-        assert_eq!(settings.filename_safe_mode, FilenameSafeMode::ReplaceWithUnderscore);
+        assert_eq!(
+            settings.filename_safe_mode,
+            FilenameSafeMode::ReplaceWithUnderscore
+        );
     }
 
     #[test]
@@ -150,10 +151,8 @@ mod tests {
 
     #[test]
     fn save_and_load_settings_round_trip() {
-        let temp_dir = std::env::temp_dir().join(format!(
-            "dingtalk-settings-test-{}",
-            std::process::id()
-        ));
+        let temp_dir =
+            std::env::temp_dir().join(format!("dingtalk-settings-test-{}", std::process::id()));
         let _ = fs::remove_dir_all(&temp_dir);
 
         let settings_path = temp_dir.join("test-settings.json");

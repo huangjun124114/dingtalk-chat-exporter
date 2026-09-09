@@ -577,7 +577,9 @@ fn fetch_message_pages(
     cancel: &AtomicBool,
 ) -> Result<(), String> {
     // 翻页起始时间：有 end_time 则从 end_time 开始往更早翻，否则从当前时间开始
-    let mut current_time = end_time.map(|s| s.to_string()).unwrap_or_else(current_time_str);
+    let mut current_time = end_time
+        .map(|s| s.to_string())
+        .unwrap_or_else(current_time_str);
     let mut page_limit = INITIAL_PAGE_LIMIT;
     for page in 1..=MAX_PAGES {
         let mut args = vec![

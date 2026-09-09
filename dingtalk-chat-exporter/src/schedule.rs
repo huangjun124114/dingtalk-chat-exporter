@@ -343,10 +343,7 @@ impl ScheduleStore {
 
     /// 同群冲突检测（决策3：保存时显式拒绝）
     /// 返回冲突描述：(冲突任务名, 冲突群名)
-    pub fn find_group_conflict(
-        &self,
-        candidate: &Schedule,
-    ) -> Option<(String, String)> {
+    pub fn find_group_conflict(&self, candidate: &Schedule) -> Option<(String, String)> {
         let candidate_ids: Vec<&str> = candidate
             .groups
             .iter()
@@ -445,7 +442,11 @@ fn config_dir() -> PathBuf {
     } else if cfg!(target_os = "macos") {
         std::env::var("HOME")
             .ok()
-            .map(|path| PathBuf::from(path).join("Library").join("Application Support"))
+            .map(|path| {
+                PathBuf::from(path)
+                    .join("Library")
+                    .join("Application Support")
+            })
             .unwrap_or_else(|| PathBuf::from("."))
     } else {
         std::env::var("HOME")
@@ -474,8 +475,8 @@ fn load_store_from(path: &Path) -> Result<ScheduleStore, String> {
     if !path.exists() {
         return Ok(ScheduleStore::default());
     }
-    let content = fs::read_to_string(path)
-        .map_err(|error| format!("读取定时任务文件失败: {error}"))?;
+    let content =
+        fs::read_to_string(path).map_err(|error| format!("读取定时任务文件失败: {error}"))?;
     match serde_json::from_str::<ScheduleStore>(&content) {
         Ok(store) => Ok(store),
         Err(error) => {
@@ -500,8 +501,7 @@ pub fn save_store(store: &ScheduleStore) -> Result<(), String> {
 fn save_store_to(store: &ScheduleStore, path: &Path) -> Result<(), String> {
     if let Some(parent) = path.parent() {
         if !parent.exists() {
-            fs::create_dir_all(parent)
-                .map_err(|error| format!("创建配置目录失败: {error}"))?;
+            fs::create_dir_all(parent).map_err(|error| format!("创建配置目录失败: {error}"))?;
         }
     }
     let json = serde_json::to_string_pretty(store)
@@ -706,7 +706,9 @@ mod tests {
     #[test]
     fn conflict_detection_rejects_same_group() {
         let mut store = ScheduleStore::default();
-        store.schedules.push(test_schedule("sch_1", "任务A", "cid_x"));
+        store
+            .schedules
+            .push(test_schedule("sch_1", "任务A", "cid_x"));
 
         // 新任务引用同一群 → 冲突
         let candidate = test_schedule("sch_2", "任务B", "cid_x");
@@ -838,10 +840,8 @@ mod tests {
 
     #[test]
     fn store_round_trip_with_temp_file() {
-        let temp_dir = std::env::temp_dir().join(format!(
-            "dingtalk-schedule-test-{}",
-            std::process::id()
-        ));
+        let temp_dir =
+            std::env::temp_dir().join(format!("dingtalk-schedule-test-{}", std::process::id()));
         let _ = fs::remove_dir_all(&temp_dir);
         fs::create_dir_all(&temp_dir).unwrap();
         let path = temp_dir.join("schedules.json");
@@ -881,10 +881,8 @@ mod tests {
 
     #[test]
     fn corrupted_store_backs_up_and_returns_empty() {
-        let temp_dir = std::env::temp_dir().join(format!(
-            "dingtalk-schedule-corrupt-{}",
-            std::process::id()
-        ));
+        let temp_dir =
+            std::env::temp_dir().join(format!("dingtalk-schedule-corrupt-{}", std::process::id()));
         let _ = fs::remove_dir_all(&temp_dir);
         fs::create_dir_all(&temp_dir).unwrap();
         let path = temp_dir.join("schedules.json");
@@ -901,10 +899,8 @@ mod tests {
 
     #[test]
     fn missing_store_file_returns_default() {
-        let temp_dir = std::env::temp_dir().join(format!(
-            "dingtalk-schedule-missing-{}",
-            std::process::id()
-        ));
+        let temp_dir =
+            std::env::temp_dir().join(format!("dingtalk-schedule-missing-{}", std::process::id()));
         let _ = fs::remove_dir_all(&temp_dir);
         let path = temp_dir.join("schedules.json");
         let loaded = load_store_from(&path).unwrap();
@@ -946,7 +942,7 @@ mod tests {
     #[test]
     fn compute_next_run_respects_start_time() {
         let config = simple_config(ScheduleUnit::Day, 1); // 每天 02:30
-        // 基准时间早于 startTime → 首次触发为 startTime 之后的第一个 02:30
+                                                          // 基准时间早于 startTime → 首次触发为 startTime 之后的第一个 02:30
         let next = compute_next_run(&config, "2026-09-01 00:00:00").unwrap();
         assert_eq!(next, "2026-09-10 02:30:00");
 

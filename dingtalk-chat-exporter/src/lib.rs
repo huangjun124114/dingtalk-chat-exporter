@@ -10,6 +10,7 @@ mod export_log;
 mod exporter;
 mod media;
 mod schedule;
+mod scheduler;
 mod settings;
 mod viewer;
 
@@ -33,8 +34,8 @@ fn get_app_version() -> &'static str {
 }
 
 pub struct AppState {
-    inner: Arc<Mutex<AppInner>>,
-    cancel_requested: Arc<AtomicBool>,
+    pub(crate) inner: Arc<Mutex<AppInner>>,
+    pub(crate) cancel_requested: Arc<AtomicBool>,
 }
 
 impl Default for AppState {
@@ -510,7 +511,13 @@ fn run_export(
     match outcome.status.as_str() {
         "cancelled" => {
             append_log(&state, "导出已由用户取消；已导出内容保留在对应目录中");
-            finish_task(&state, "cancelled", "导出已取消".into(), None, Some(output_root));
+            finish_task(
+                &state,
+                "cancelled",
+                "导出已取消".into(),
+                None,
+                Some(output_root),
+            );
         }
         "done" => finish_task(
             &state,
@@ -779,9 +786,13 @@ fn get_diagnostics_info() -> Result<serde_json::Value, String> {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    let app_state = AppState::default();
+    // 启动后台调度线程（定时导出），与界面手动导出共享任务槽互斥
+    scheduler::start_scheduler(app_state.inner.clone(), app_state.cancel_requested.clone());
+
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
-        .manage(AppState::default())
+        .manage(app_state)
         .invoke_handler(tauri::generate_handler![
             get_app_version,
             check_env,

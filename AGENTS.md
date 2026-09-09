@@ -26,7 +26,11 @@ dingtalk-chat-exporter/      源码项目
     ├── dws.rs               dws CLI 调用封装(找 dws/登录检测/搜群/拉消息/下载附件)
     ├── date.rs              dws 时间格式校验与日期换算
     ├── media.rs             消息附件标记解析与文件名提取
-    └── viewer.rs            流式生成聊天 HTML(附件 base64 内嵌)
+    ├── viewer.rs            流式生成聊天 HTML(附件 base64 内嵌)
+    ├── exporter.rs          导出核心(手动/定时共用):ExportJob + run_job + ArchiveStrategy
+    ├── cron.rs              自研最小 cron 引擎(5 字段,*/N/范围/列表/星期名,北京时间)
+    ├── schedule.rs          调度模型与持久化(Schedule/ScheduleConfig/ScheduleRun/ScheduleStore)
+    └── scheduler.rs         后台调度引擎(30s tick 三阶段 + 水位线增量 + skipped 互斥)
 ```
 
 ## 核心设计
@@ -122,6 +126,25 @@ Tauri 在 Windows target 编译时必须有 `icons/icon.ico`,否则 build.rs 报
 | `cancel_export` | 取消当前导出并终止正在执行的 dws 子进程 |
 | `snapshot` | 轮询获取当前状态(进度/日志) |
 | `open_output` | 在文件管理器打开导出目录 |
+| `list_schedules` | 列出全部定时任务(含自然语言描述) |
+| `get_schedule_runs` | 查看某任务的运行历史(最多 50 条,含日志) |
+| `preview_schedule` | 按配置预览未来 3 次触发时间 |
+| `validate_schedule` | 预校验任务(cron/时间格式/同群冲突) |
+| `save_schedule` | 新建/编辑任务(编辑时保留水位线与运行历史) |
+| `delete_schedule` | 删除任务(连同运行历史) |
+| `toggle_schedule` | 启用/停用任务(启用时重算下次触发) |
+| `run_schedule_now` | 立即运行一次(与手动导出共享任务槽,忙则拒绝) |
+
+## 定时导出核心设计(v1.1.0)
+
+- **增量水位线**:每个任务记录 `lastSuccessAt`,运行区间 = [水位线, 触发时刻);仅完整成功才推进水位线,失败/取消下次自动重拉,不丢数据。
+- **首次拉取起点**:max(最早聊天日志日期参数, 群创建时间);都缺失则全量。
+- **不补跑**:错过触发点(关机/忙)后,`nextRunAt` 从当前时刻重算;漏掉的区间由水位线兜底在下次运行补齐。
+- **全局单任务互斥**:手动与定时共享 `AppInner.task` 槽;定时到期遇忙 → 运行记录 `skipped`。
+- **三阶段 tick(30s)**:短锁扫描(补算 nextRunAt/找到期/记 skipped) → 长导出(不持 store 锁) → 短锁回写(水位线/运行记录/重算下次)。
+- **锁顺序纪律**:busy 快照必须在拿 store 锁之前取(避免 store→inner 与命令的 inner→store 嵌套死锁);`execute` 内双重检查兜底。
+- **归档策略**:`ScheduledGroupArchive` 固定 `输出目录/群名/` 归档,按月合并 HTML(消息 ID 去重),附件已存在即复用;手动导出仍走 `PerRunArchive` 每次独立目录。
+- **同群冲突**:同一群只允许被一个定时任务引用;前端勾选时预警,后端 `save_schedule` 硬拒绝。
 
 ## 参考项目
 

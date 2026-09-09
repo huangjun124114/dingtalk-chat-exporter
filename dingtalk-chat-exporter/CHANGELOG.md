@@ -7,6 +7,35 @@
 
 ---
 
+## [1.1.0] - 2026-09-09
+
+### 新增
+- **定时导出功能**：支持按周期（分钟/小时/天/周/月）自动增量导出群聊记录
+  - `src/cron.rs`：自研最小 cron 引擎（5 字段，支持 `*/N`、范围、列表、星期名称、Vixie 日/周并集语义，北京时间）
+  - `src/schedule.rs`：调度模型与持久化（`Schedule`/`ScheduleConfig`/`ScheduleRun`/`ScheduleStore`），含同群冲突校验
+  - `src/scheduler.rs`：后台调度引擎（30s tick 三阶段：短锁扫描 → 无锁导出 → 短锁回写），增量水位线（`lastSuccessAt`），忙时记 `skipped` 不补跑
+  - `src/exporter.rs`：导出核心抽离，手动/定时共用 `ExportJob` + `run_job`；`ArchiveStrategy` trait 区分两种归档策略
+    - `PerRunArchive`：手动导出，每次独立目录
+    - `ScheduledGroupArchive`：定时导出，固定群目录 + 按月合并 HTML（消息 ID 去重）+ 附件复用
+- **前端定时任务视图**：任务列表（启停开关/下次运行/水位线/累计次数）、三步创建向导（选群 → 调度配置 → 输出与首次拉取起点）、cron 预览未来 3 次触发、运行记录查看器（含每次运行日志）、同群冲突创建时预警
+- **8 个 Tauri 命令**：`list_schedules` / `get_schedule_runs` / `preview_schedule` / `validate_schedule` / `save_schedule` / `delete_schedule` / `toggle_schedule` / `run_schedule_now`
+- **最早聊天日志日期参数**：首次拉取从「该日期」与「群创建时间」中较晚者开始
+
+### 改进
+- **全局单任务互斥**：手动导出与定时导出共享任务槽，定时任务到期遇忙时标记 `skipped`，水位线保证不丢数据
+- **不补跑策略**：错过触发点后下次运行时间从当前时刻重新计算，避免开机后批量补跑
+- **运行历史**：每个任务保留最近 50 次运行记录（成功/部分成功/失败/跳过），含拉取区间、消息数、附件统计与完整日志
+
+### 重构
+- **消除代码重复**：`lib.rs` 中约 400 行的 `run_export` 与 8 个辅助函数迁移至 `exporter.rs`，手动导出路径变为共享引擎的薄封装
+- `ExportProgress` trait 解耦 Tauri 状态与导出核心，新增 `log_snapshot()` 支持归档日志快照
+
+### 测试
+- 全量 108 个单元测试通过（新增 cron 引擎、调度模型、scheduler 扫描/水位线/互斥等测试）
+- `cargo clippy` 零警告，`cargo fmt` 通过
+
+---
+
 ## [1.0.4] - 2026-08-31
 
 ### 新增

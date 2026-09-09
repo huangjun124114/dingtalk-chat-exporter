@@ -5,37 +5,23 @@ use std::fs;
 use std::path::PathBuf;
 
 /// 文件名安全处理模式
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
 pub enum FilenameSafeMode {
     /// 将不安全字符替换为下划线
+    #[default]
     ReplaceWithUnderscore,
     /// 静默移除不安全字符
     RemoveSilently,
 }
 
-impl Default for FilenameSafeMode {
-    fn default() -> Self {
-        FilenameSafeMode::ReplaceWithUnderscore
-    }
-}
-
 /// 应用设置
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AppSettings {
     /// 默认输出目录（None 表示使用可执行文件所在目录）
     pub default_output_dir: Option<String>,
     /// 文件名安全处理模式
     pub filename_safe_mode: FilenameSafeMode,
-}
-
-impl Default for AppSettings {
-    fn default() -> Self {
-        AppSettings {
-            default_output_dir: None,
-            filename_safe_mode: FilenameSafeMode::default(),
-        }
-    }
 }
 
 /// 设置文件名

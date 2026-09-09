@@ -103,7 +103,7 @@ impl ProcessTree {
                     CloseHandle(job);
                     return Err(format!("加入 Windows Job Object 失败: {error}"));
                 }
-                return Ok(Self { job });
+                Ok(Self { job })
             }
         }
 

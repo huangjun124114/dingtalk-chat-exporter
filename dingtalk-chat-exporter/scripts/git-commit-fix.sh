@@ -6,12 +6,13 @@
 # reflog 总是正确记录新哈希。本脚本：commit → 从 reflog 读新哈希 → 写回 loose ref → push。
 #
 # 用法：
-#   git-commit-fix.sh "提交信息文件路径" [分支名] [是否push:1/0]
+#   git-commit-fix.sh "提交信息(字符串或信息文件路径)" [分支名] [是否push:1/0]
 # 前置：已 git add 待提交内容。
+# 说明：第一参数若为已存在文件则按 -F 文件提交，否则按 -m 字符串提交。
 
 set -euo pipefail
 
-MSG_FILE="${1:?需要提交信息文件路径}"
+MSG_ARG="${1:?需要提交信息（字符串或文件路径）}"
 BRANCH="${2:-feat/scheduled-export}"
 DO_PUSH="${3:-1}"
 
@@ -27,8 +28,12 @@ if [ -z "$(git diff --cached --name-only)" ]; then
     exit 1
 fi
 
-# 执行提交（允许 ref 不落盘）
-git -c user.name="huangjun124" -c user.email="176446481@qq.com" commit -F "$MSG_FILE" >/dev/null 2>&1 || true
+# 执行提交（允许 ref 不落盘）；按入参是文件还是字符串选择 -F / -m
+if [ -f "$MSG_ARG" ]; then
+    git -c user.name="huangjun124" -c user.email="176446481@qq.com" commit -F "$MSG_ARG" >/dev/null 2>&1 || true
+else
+    git -c user.name="huangjun124" -c user.email="176446481@qq.com" commit -m "$MSG_ARG" >/dev/null 2>&1 || true
+fi
 
 # 从 reflog 末尾读取本次提交的新哈希
 NEW="$(tail -n 1 .git/logs/HEAD | awk '{print $2}')"

@@ -55,13 +55,7 @@ pub fn tick(inner: &Arc<Mutex<AppInner>>, cancel_requested: &Arc<AtomicBool>) {
                 eprintln!("[scheduler] 任务 {schedule_id} 到期但已有导出在运行，标记 skipped");
                 return;
             }
-            ScanResult::Due {
-                schedule,
-                trigger_time,
-            } => DueTrigger {
-                schedule,
-                trigger_time,
-            },
+            ScanResult::Due { trigger } => *trigger,
         }
     };
 
@@ -119,13 +113,9 @@ struct DueTrigger {
 
 enum ScanResult {
     None,
-    Skipped {
-        schedule_id: String,
-    },
-    Due {
-        schedule: Schedule,
-        trigger_time: String,
-    },
+    Skipped { schedule_id: String },
+    // Box 避免大字段拉高整个枚举的体积（clippy::large_enum_variant）
+    Due { trigger: Box<DueTrigger> },
 }
 
 /// 扫描到期任务；顺带为缺 next_run_at 的启用任务补算并持久化。
@@ -204,8 +194,10 @@ where
     }
 
     ScanResult::Due {
-        schedule,
-        trigger_time,
+        trigger: Box::new(DueTrigger {
+            schedule,
+            trigger_time,
+        }),
     }
 }
 
@@ -543,12 +535,9 @@ mod tests {
             &mut |_| Ok(()),
         );
         match result {
-            ScanResult::Due {
-                schedule,
-                trigger_time,
-            } => {
-                assert_eq!(schedule.id, "sch_1");
-                assert_eq!(trigger_time, "2026-09-09 02:30:00");
+            ScanResult::Due { trigger } => {
+                assert_eq!(trigger.schedule.id, "sch_1");
+                assert_eq!(trigger.trigger_time, "2026-09-09 02:30:00");
             }
             other => panic!(
                 "应返回 Due，实际 {:?}",

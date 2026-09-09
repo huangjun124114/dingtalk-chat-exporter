@@ -798,7 +798,10 @@ struct ScheduleView {
 impl ScheduleView {
     fn from(schedule: schedule::Schedule) -> Self {
         let description = schedule.schedule.describe();
-        ScheduleView { schedule, description }
+        ScheduleView {
+            schedule,
+            description,
+        }
     }
 }
 
@@ -806,7 +809,11 @@ impl ScheduleView {
 fn list_schedules() -> Result<Vec<ScheduleView>, String> {
     let _guard = scheduler::store_guard();
     let store = schedule::load_store()?;
-    Ok(store.schedules.into_iter().map(ScheduleView::from).collect())
+    Ok(store
+        .schedules
+        .into_iter()
+        .map(ScheduleView::from)
+        .collect())
 }
 
 #[tauri::command]
@@ -822,8 +829,7 @@ fn get_schedule_runs(id: String) -> Result<Vec<schedule::ScheduleRun>, String> {
 fn preview_schedule(config: schedule::ScheduleConfig) -> Result<Vec<String>, String> {
     let cron = config.validate()?;
     let now = dws::current_time_str();
-    let first =
-        schedule::compute_next_run(&config, &now).ok_or("cron 表达式无有效触发时间")?;
+    let first = schedule::compute_next_run(&config, &now).ok_or("cron 表达式无有效触发时间")?;
     let mut result = vec![first.clone()];
     let mut cursor = first;
     for _ in 0..2 {

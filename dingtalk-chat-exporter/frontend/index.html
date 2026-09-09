@@ -111,6 +111,57 @@ body{font-family:"PingFang SC","Microsoft YaHei",-apple-system,BlinkMacSystemFon
 .about-desc{font-size:14px;color:var(--sub);line-height:1.8;max-width:400px;margin:0 auto 20px;}
 .about-info{font-size:13px;color:var(--sub);line-height:1.8;}
 .about-env{font-size:13px;line-height:2;}
+/* 定时任务页 */
+.sched-toolbar{display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;}
+.sched-toolbar .title{font-size:16px;font-weight:600;}
+.sched-card{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:16px 18px;margin-bottom:12px;}
+.sched-card.disabled{opacity:.6;}
+.sched-head{display:flex;align-items:center;gap:10px;margin-bottom:10px;}
+.sched-head .sname{font-size:15px;font-weight:600;}
+.sched-head .sdesc{font-size:13px;color:var(--blue);background:var(--blue-light);padding:2px 10px;border-radius:6px;}
+.sched-head .spacer{flex:1;}
+.sched-meta{display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:8px;font-size:13px;color:var(--sub);margin-bottom:12px;}
+.sched-meta b{color:var(--text);font-weight:500;}
+.sched-groups{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:12px;}
+.sched-chip{font-size:12px;background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:3px 10px;color:var(--text);}
+.sched-actions{display:flex;gap:8px;flex-wrap:wrap;}
+.sched-actions .btn{padding:7px 14px;font-size:13px;}
+/* 开关 */
+.switch{position:relative;display:inline-block;width:42px;height:24px;flex-shrink:0;}
+.switch input{opacity:0;width:0;height:0;}
+.switch .slider{position:absolute;cursor:pointer;inset:0;background:#C9CDD4;border-radius:24px;transition:.2s;}
+.switch .slider:before{content:"";position:absolute;height:18px;width:18px;left:3px;top:3px;background:#fff;border-radius:50%;transition:.2s;}
+.switch input:checked + .slider{background:var(--green);}
+.switch input:checked + .slider:before{transform:translateX(18px);}
+/* 表单 */
+.form-row{margin-bottom:14px;}
+.form-row > label{display:block;font-size:13px;font-weight:500;margin-bottom:6px;color:var(--text);}
+.form-input{padding:9px 14px;border:1px solid var(--border);border-radius:8px;font-size:14px;outline:none;width:100%;background:var(--card);color:var(--text);}
+.form-input:focus{border-color:var(--blue);box-shadow:0 0 0 2px var(--blue-light);}
+.form-hint{font-size:12px;color:var(--sub);margin-top:6px;line-height:1.5;}
+.seg{display:inline-flex;border:1px solid var(--border);border-radius:8px;overflow:hidden;}
+.seg button{padding:8px 18px;border:none;background:var(--card);font-size:13px;cursor:pointer;color:var(--text);}
+.seg button.active{background:var(--blue);color:#fff;font-weight:500;}
+.chip-select{display:flex;flex-wrap:wrap;gap:8px;}
+.chip-select .chip{padding:6px 14px;border:1px solid var(--border);border-radius:8px;font-size:13px;cursor:pointer;background:var(--card);user-select:none;}
+.chip-select .chip.active{background:var(--blue);color:#fff;border-color:var(--blue);}
+.day-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:6px;max-width:340px;}
+.day-grid .chip{text-align:center;padding:8px 0;}
+.preview-box{background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:10px 14px;font-size:13px;color:var(--text);margin-top:8px;line-height:1.8;}
+.preview-box .empty{padding:8px;}
+/* 运行记录 */
+.run-status{display:inline-block;padding:2px 8px;border-radius:4px;font-size:12px;}
+.run-status.success{background:#E8F8E8;color:var(--green);}
+.run-status.partial{background:#FFF7E6;color:var(--orange);}
+.run-status.error{background:#FFF2F0;color:var(--red);}
+.run-status.skipped{background:var(--bg);color:var(--sub);}
+.modal-mask{display:none;position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:100;align-items:flex-start;justify-content:center;padding:40px 20px;overflow-y:auto;}
+.modal-mask.show{display:flex;}
+.modal{background:var(--card);border-radius:12px;width:100%;max-width:720px;padding:20px 22px;}
+.modal-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;}
+.modal-head h2{font-size:16px;font-weight:600;}
+.modal-close{cursor:pointer;font-size:22px;color:var(--sub);line-height:1;border:none;background:none;}
+.run-log-box{background:#1e1e1e;color:#d4d4d4;border-radius:8px;padding:12px;font-family:"SF Mono",Menlo,Consolas,monospace;font-size:12px;line-height:1.6;max-height:240px;overflow-y:auto;white-space:pre-wrap;word-break:break-all;margin-top:8px;}
 </style>
 </head>
 <body>
@@ -130,6 +181,7 @@ body{font-family:"PingFang SC","Microsoft YaHei",-apple-system,BlinkMacSystemFon
   <!-- 侧边栏 -->
   <nav class="sidebar-nav">
     <div class="nav-item active" data-view="export">📤 导出</div>
+    <div class="nav-item" data-view="schedules">⏰ 定时</div>
     <div class="nav-item" data-view="logs">📋 日志</div>
     <div class="nav-item" data-view="settings">⚙️ 设置</div>
     <div class="nav-item" data-view="about">ℹ️ 关于</div>
@@ -208,6 +260,17 @@ body{font-family:"PingFang SC","Microsoft YaHei",-apple-system,BlinkMacSystemFon
           </div>
           <button class="btn btn-green" id="openResultBtn">打开文件夹</button>
         </div>
+      </div>
+    </div>
+
+    <!-- 定时任务页 -->
+    <div id="schedulesView" style="display:none;">
+      <div class="sched-toolbar">
+        <div class="title">⏰ 定时导出任务</div>
+        <button class="btn btn-blue" id="newScheduleBtn">+ 新建任务</button>
+      </div>
+      <div id="scheduleList">
+        <div class="empty">暂无定时任务，点击右上角「新建任务」开始配置</div>
       </div>
     </div>
 
@@ -324,6 +387,138 @@ body{font-family:"PingFang SC","Microsoft YaHei",-apple-system,BlinkMacSystemFon
   </div>
 </div>
 
+<!-- 创建/编辑定时任务模态框 -->
+<div class="modal-mask" id="scheduleModal">
+  <div class="modal">
+    <div class="modal-head">
+      <h2 id="scheduleModalTitle">新建定时任务</h2>
+      <button class="modal-close" id="scheduleModalClose">×</button>
+    </div>
+
+    <!-- 步骤1: 选择群 -->
+    <div class="card" style="margin-bottom:14px;">
+      <h2><span class="step-num">1</span> 选择要定时导出的群</h2>
+      <div class="search-bar">
+        <input type="text" id="schedSearchInput" placeholder="输入群名称关键词搜索">
+        <button class="btn btn-blue" id="schedSearchBtn">搜索</button>
+      </div>
+      <div class="group-list" id="schedGroupList" style="max-height:180px;">
+        <div class="empty">搜索并勾选群（已被其他任务占用的群会提示冲突）</div>
+      </div>
+      <div class="sched-groups" id="schedSelectedChips" style="margin-top:10px;margin-bottom:0;"></div>
+    </div>
+
+    <!-- 步骤2: 调度周期 -->
+    <div class="card" style="margin-bottom:14px;">
+      <h2><span class="step-num">2</span> 设置调度周期</h2>
+      <div class="form-row">
+        <label>任务名称</label>
+        <input class="form-input" id="schedName" placeholder="如：技术支持群每日归档" maxlength="60">
+      </div>
+      <div class="form-row">
+        <label>配置方式</label>
+        <div class="seg" id="schedModeSeg">
+          <button type="button" data-mode="simple" class="active">简单模式</button>
+          <button type="button" data-mode="cron">Cron 表达式</button>
+        </div>
+      </div>
+      <div id="schedSimplePanel">
+        <div class="form-row">
+          <label>周期</label>
+          <div class="seg" id="schedUnitSeg">
+            <button type="button" data-unit="minute">分钟</button>
+            <button type="button" data-unit="hour">小时</button>
+            <button type="button" data-unit="day" class="active">天</button>
+            <button type="button" data-unit="week">周</button>
+            <button type="button" data-unit="month">月</button>
+          </div>
+        </div>
+        <div class="form-row" id="schedIntervalRow">
+          <label>间隔（每 N 个周期）</label>
+          <input type="number" class="form-input" id="schedInterval" value="1" min="1" style="width:120px;">
+        </div>
+        <div class="form-row" id="schedAtTimeRow">
+          <label>触发时刻</label>
+          <input type="time" class="form-input" id="schedAtTime" value="09:00" style="width:160px;">
+        </div>
+        <div class="form-row" id="schedWeekdaysRow" style="display:none;">
+          <label>星期（可多选）</label>
+          <div class="chip-select day-grid" id="schedWeekdays">
+            <div class="chip" data-day="1">一</div><div class="chip" data-day="2">二</div><div class="chip" data-day="3">三</div>
+            <div class="chip" data-day="4">四</div><div class="chip" data-day="5">五</div><div class="chip" data-day="6">六</div>
+            <div class="chip" data-day="0">日</div>
+          </div>
+        </div>
+        <div class="form-row" id="schedMonthDaysRow" style="display:none;">
+          <label>每月第几天（可多选）</label>
+          <div class="chip-select day-grid" id="schedMonthDays" style="grid-template-columns:repeat(7,1fr);max-width:420px;"></div>
+        </div>
+      </div>
+      <div id="schedCronPanel" style="display:none;">
+        <div class="form-row">
+          <label>Cron 表达式（5 段：分 时 日 月 周）</label>
+          <input class="form-input" id="schedCron" placeholder="如：0 9 * * 1-5 表示工作日每天 09:00">
+          <div class="form-hint">支持 */N、范围、列表、星期名称；按北京时间解析。</div>
+        </div>
+      </div>
+      <div class="form-row">
+        <label>调度生效开始时间</label>
+        <input type="datetime-local" class="form-input" id="schedStartTime" step="1" style="width:260px;">
+        <div class="form-hint">早于该时间的触发点会被跳过；留空默认从当前时间开始。</div>
+      </div>
+      <button class="btn btn-outline" id="schedPreviewBtn" style="padding:7px 14px;font-size:13px;">预览未来 3 次触发</button>
+      <div class="preview-box" id="schedPreviewBox" style="display:none;"></div>
+    </div>
+
+    <!-- 步骤3: 输出与起点 -->
+    <div class="card" style="margin-bottom:14px;">
+      <h2><span class="step-num">3</span> 保存位置与首次拉取起点</h2>
+      <div class="form-row">
+        <label>输出根目录</label>
+        <div class="output-bar">
+          <div class="path" id="schedOutputPath">未选择</div>
+          <button class="btn btn-outline" id="schedChooseDirBtn">选择文件夹</button>
+        </div>
+        <div class="form-hint">留空则使用「设置」页的默认保存位置。每个群固定归档到 输出目录/群名/ 下，按月合并 HTML。</div>
+      </div>
+      <div class="form-row">
+        <label>最早聊天日志日期（首次拉取起点）</label>
+        <input type="datetime-local" class="form-input" id="schedEarliestDate" step="1" style="width:260px;">
+        <div class="form-hint">首次运行从「该日期」与「群创建时间」中较晚者开始拉取；留空则自动取群创建时间。</div>
+      </div>
+    </div>
+
+    <div style="display:flex;gap:8px;justify-content:flex-end;">
+      <button class="btn btn-outline" id="schedCancelBtn">取消</button>
+      <button class="btn btn-blue" id="schedSaveBtn">保存任务</button>
+    </div>
+  </div>
+</div>
+
+<!-- 运行记录模态框 -->
+<div class="modal-mask" id="runsModal">
+  <div class="modal">
+    <div class="modal-head">
+      <h2 id="runsModalTitle">运行记录</h2>
+      <button class="modal-close" id="runsModalClose">×</button>
+    </div>
+    <div class="log-table-wrapper">
+      <table class="log-table">
+        <thead>
+          <tr><th>触发时间</th><th>状态</th><th>拉取区间</th><th>消息数</th><th>附件</th></tr>
+        </thead>
+        <tbody id="runsTableBody">
+          <tr><td colspan="5" class="empty">加载中...</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div id="runDetailArea" style="display:none;margin-top:14px;">
+      <b style="font-size:13px;">运行日志：</b>
+      <div class="run-log-box" id="runDetailLog"></div>
+    </div>
+  </div>
+</div>
+
 <script>
 let invoke;
 if (window.__TAURI_INTERNALS__ && window.__TAURI_INTERNALS__.invoke) {
@@ -349,9 +544,11 @@ function switchView(view) {
   var activeNav = document.querySelector('.nav-item[data-view="' + view + '"]');
   if (activeNav) activeNav.classList.add('active');
   document.getElementById('exportView').style.display = view === 'export' ? '' : 'none';
+  document.getElementById('schedulesView').style.display = view === 'schedules' ? '' : 'none';
   document.getElementById('logsView').style.display = view === 'logs' ? '' : 'none';
   document.getElementById('settingsView').style.display = view === 'settings' ? '' : 'none';
   document.getElementById('aboutView').style.display = view === 'about' ? '' : 'none';
+  if (view === 'schedules') loadSchedules();
   if (view === 'logs') loadExportLogs();
   if (view === 'settings') loadSettings();
   if (view === 'about') updateAboutPage();
@@ -730,6 +927,10 @@ function showTaskResult(task) {
   if (currentView === 'logs') {
     loadExportLogs();
   }
+  // 定时任务运行也走同一任务槽，完成后刷新定时页（水位线/运行历史可能已更新）
+  if (currentView === 'schedules') {
+    loadSchedules();
+  }
 }
 
 async function cancelExport() {
@@ -994,6 +1195,495 @@ function updateAboutPage() {
   });
 }
 
+// ============ 定时任务页 ============
+let allSchedules = [];
+let editingScheduleId = '';       // 空串 = 新建
+let schedSelectedGroups = [];     // [{title, openConversationId, createAt}]
+let schedSearchResults = [];
+let schedMode = 'simple';
+let schedUnit = 'day';
+let schedWeekdays = [];
+let schedMonthDays = [];
+
+async function loadSchedules() {
+  var list = document.getElementById('scheduleList');
+  try {
+    allSchedules = await invoke('list_schedules');
+    renderSchedules();
+  } catch(e) {
+    list.innerHTML = '<div class="empty" style="color:var(--red);">加载失败: ' + escapeHtml(String(e)) + '</div>';
+  }
+}
+
+function renderSchedules() {
+  var list = document.getElementById('scheduleList');
+  if (!allSchedules || allSchedules.length === 0) {
+    list.innerHTML = '<div class="empty">暂无定时任务，点击右上角「新建任务」开始配置</div>';
+    return;
+  }
+  list.innerHTML = allSchedules.map(function(s) {
+    var groups = (s.groups || []).map(function(g) {
+      return '<span class="sched-chip">' + escapeHtml(g.title) + '</span>';
+    }).join('');
+    var lastRun = s.lastRunAt || '尚未运行';
+    var nextRun = s.enabled ? (s.nextRunAt || '计算中...') : '已停用';
+    var watermark = s.lastSuccessAt || '未建立（下次为首次拉取）';
+    return '<div class="sched-card' + (s.enabled ? '' : ' disabled') + '" data-id="' + escapeHtml(s.id) + '">' +
+      '<div class="sched-head">' +
+        '<span class="sname">' + escapeHtml(s.name) + '</span>' +
+        '<span class="sdesc">' + escapeHtml(s.description || '') + '</span>' +
+        '<span class="spacer"></span>' +
+        '<label class="switch" title="启用/停用"><input type="checkbox" class="sched-toggle"' + (s.enabled ? ' checked' : '') + '><span class="slider"></span></label>' +
+      '</div>' +
+      '<div class="sched-groups">' + groups + '</div>' +
+      '<div class="sched-meta">' +
+        '<span><b>下次运行</b>：' + escapeHtml(nextRun) + '</span>' +
+        '<span><b>上次运行</b>：' + escapeHtml(lastRun) + '</span>' +
+        '<span><b>水位线</b>：' + escapeHtml(watermark) + '</span>' +
+        '<span><b>累计运行</b>：' + (s.runCount || 0) + ' 次</span>' +
+      '</div>' +
+      '<div class="sched-actions">' +
+        '<button class="btn btn-blue sched-run-now">▶ 立即运行</button>' +
+        '<button class="btn btn-outline sched-view-runs">📋 运行记录</button>' +
+        '<button class="btn btn-outline sched-edit">✏️ 编辑</button>' +
+        '<button class="btn btn-red sched-delete">🗑 删除</button>' +
+      '</div>' +
+    '</div>';
+  }).join('');
+
+  list.querySelectorAll('.sched-card').forEach(function(card) {
+    var id = card.dataset.id;
+    card.querySelector('.sched-toggle').addEventListener('change', function() { toggleSchedule(id, this.checked); });
+    card.querySelector('.sched-run-now').addEventListener('click', function() { runScheduleNow(id); });
+    card.querySelector('.sched-view-runs').addEventListener('click', function() { showScheduleRuns(id); });
+    card.querySelector('.sched-edit').addEventListener('click', function() { openScheduleModal(id); });
+    card.querySelector('.sched-delete').addEventListener('click', function() { deleteSchedule(id); });
+  });
+}
+
+async function toggleSchedule(id, enabled) {
+  try {
+    await invoke('toggle_schedule', { id: id, enabled: enabled });
+    loadSchedules();
+  } catch(e) {
+    alert('切换失败: ' + e);
+    loadSchedules();
+  }
+}
+
+async function deleteSchedule(id) {
+  var s = allSchedules.find(function(x) { return x.id === id; });
+  var name = s ? s.name : id;
+  if (!confirm('确定删除定时任务「' + name + '」吗？\n\n删除后运行历史一并清除，已导出的文件不受影响。')) return;
+  try {
+    await invoke('delete_schedule', { id: id });
+    loadSchedules();
+  } catch(e) {
+    alert('删除失败: ' + e);
+  }
+}
+
+async function runScheduleNow(id) {
+  if (!confirm('立即运行一次该任务？\n\n将从水位线增量拉取到当前时刻；若正在导出其他任务会被拒绝。')) return;
+  try {
+    await invoke('run_schedule_now', { id: id });
+    alert('已开始运行，可在「运行记录」中查看结果。\n（与手动导出共用任务槽，进度可在导出页观察）');
+    // 运行是异步的，稍后刷新列表
+    setTimeout(loadSchedules, 1500);
+  } catch(e) {
+    alert('启动失败: ' + e);
+  }
+}
+
+// ---- 运行记录模态框 ----
+let currentRunsScheduleId = '';
+async function showScheduleRuns(id) {
+  var s = allSchedules.find(function(x) { return x.id === id; });
+  currentRunsScheduleId = id;
+  document.getElementById('runsModalTitle').textContent = '运行记录 — ' + (s ? s.name : id);
+  document.getElementById('runsModal').classList.add('show');
+  document.getElementById('runDetailArea').style.display = 'none';
+  var tbody = document.getElementById('runsTableBody');
+  tbody.innerHTML = '<tr><td colspan="5" class="empty">加载中...</td></tr>';
+  try {
+    var runs = await invoke('get_schedule_runs', { id: id });
+    if (!runs || runs.length === 0) {
+      tbody.innerHTML = '<tr><td colspan="5" class="empty">尚无运行记录</td></tr>';
+      return;
+    }
+    var statusMap = {success:'成功',partial:'部分成功',error:'失败',skipped:'跳过'};
+    tbody.innerHTML = runs.map(function(r, i) {
+      var range = (r.rangeStart || '最早') + ' ~ ' + (r.rangeEnd || '触发时刻');
+      return '<tr data-run-idx="' + i + '" style="cursor:pointer;">' +
+        '<td>' + escapeHtml(r.startedAt) + '</td>' +
+        '<td><span class="run-status ' + r.status + '">' + (statusMap[r.status] || r.status) + '</span></td>' +
+        '<td style="font-size:12px;">' + escapeHtml(range) + '</td>' +
+        '<td>' + (r.messageCount || 0).toLocaleString() + '</td>' +
+        '<td>' + (r.attachmentSuccess || 0) + '/' + ((r.attachmentSuccess || 0) + (r.attachmentFailed || 0)) + '</td>' +
+      '</tr>';
+    }).join('');
+    window._currentRuns = runs;
+    tbody.querySelectorAll('tr').forEach(function(row) {
+      row.addEventListener('click', function() { showRunDetail(parseInt(this.dataset.runIdx)); });
+    });
+  } catch(e) {
+    tbody.innerHTML = '<tr><td colspan="5" class="empty" style="color:var(--red);">加载失败: ' + escapeHtml(String(e)) + '</td></tr>';
+  }
+}
+
+function showRunDetail(idx) {
+  var runs = window._currentRuns || [];
+  var r = runs[idx];
+  if (!r) return;
+  var area = document.getElementById('runDetailArea');
+  var box = document.getElementById('runDetailLog');
+  var lines = (r.logLines || []).slice();
+  if (r.error) lines.push('[错误] ' + r.error);
+  if (lines.length === 0) lines.push('（该次运行无日志，可能被跳过或未产生输出）');
+  box.textContent = lines.join('\n');
+  area.style.display = '';
+  box.scrollTop = box.scrollHeight;
+}
+
+// ---- 创建/编辑模态框 ----
+function openScheduleModal(id) {
+  editingScheduleId = id || '';
+  document.getElementById('scheduleModalTitle').textContent = id ? '编辑定时任务' : '新建定时任务';
+  document.getElementById('scheduleModal').classList.add('show');
+  document.getElementById('schedPreviewBox').style.display = 'none';
+  schedSelectedGroups = [];
+  schedSearchResults = [];
+  document.getElementById('schedGroupList').innerHTML = '<div class="empty">搜索并勾选群（已被其他任务占用的群会提示冲突）</div>';
+
+  if (id) {
+    var s = allSchedules.find(function(x) { return x.id === id; });
+    if (!s) return;
+    schedSelectedGroups = (s.groups || []).map(function(g) {
+      return { title: g.title, openConversationId: g.openConversationId, createAt: g.createAt || null };
+    });
+    document.getElementById('schedName').value = s.name || '';
+    setSchedMode(s.schedule.mode === 'cron' ? 'cron' : 'simple');
+    if (s.schedule.unit) setSchedUnit(s.schedule.unit);
+    document.getElementById('schedInterval').value = s.schedule.interval || 1;
+    document.getElementById('schedAtTime').value = s.schedule.atTime || '09:00';
+    document.getElementById('schedCron').value = s.schedule.cron || '';
+    schedWeekdays = (s.schedule.weekdays || []).slice();
+    schedMonthDays = (s.schedule.monthDays || []).slice();
+    syncChipSelection();
+    document.getElementById('schedStartTime').value = toLocalInputValue(s.schedule.startTime);
+    document.getElementById('schedOutputPath').textContent = s.outputRoot || '未选择';
+    document.getElementById('schedOutputPath').dataset.value = s.outputRoot || '';
+    document.getElementById('schedEarliestDate').value = toLocalInputValue(s.earliestChatDate || '');
+  } else {
+    document.getElementById('schedName').value = '';
+    setSchedMode('simple');
+    setSchedUnit('day');
+    document.getElementById('schedInterval').value = 1;
+    document.getElementById('schedAtTime').value = '09:00';
+    document.getElementById('schedCron').value = '';
+    schedWeekdays = [1, 2, 3, 4, 5];
+    schedMonthDays = [1];
+    syncChipSelection();
+    document.getElementById('schedStartTime').value = toLocalInputValue(nowBeijingString());
+    document.getElementById('schedOutputPath').textContent = outputPath || '未选择';
+    document.getElementById('schedOutputPath').dataset.value = outputPath || '';
+    document.getElementById('schedEarliestDate').value = '';
+  }
+  renderSchedSelectedChips();
+  applyUnitVisibility();
+}
+
+function closeScheduleModal() {
+  document.getElementById('scheduleModal').classList.remove('show');
+}
+
+function nowBeijingString() {
+  var d = new Date(Date.now() + 8 * 3600 * 1000);
+  return d.toISOString().substring(0, 19).replace('T', ' ');
+}
+
+// "yyyy-MM-dd HH:mm:ss" -> datetime-local 输入值 "yyyy-MM-ddTHH:mm:ss"
+function toLocalInputValue(s) {
+  if (!s) return '';
+  return s.replace(' ', 'T');
+}
+
+// datetime-local 输入值 -> "yyyy-MM-dd HH:mm:ss"
+function fromLocalInputValue(v) {
+  if (!v) return '';
+  if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(v)) v += ':00';
+  return v.replace('T', ' ');
+}
+
+function setSchedMode(mode) {
+  schedMode = mode;
+  document.querySelectorAll('#schedModeSeg button').forEach(function(b) {
+    b.classList.toggle('active', b.dataset.mode === mode);
+  });
+  document.getElementById('schedSimplePanel').style.display = mode === 'simple' ? '' : 'none';
+  document.getElementById('schedCronPanel').style.display = mode === 'cron' ? '' : 'none';
+}
+
+function setSchedUnit(unit) {
+  schedUnit = unit;
+  document.querySelectorAll('#schedUnitSeg button').forEach(function(b) {
+    b.classList.toggle('active', b.dataset.unit === unit);
+  });
+  applyUnitVisibility();
+}
+
+function applyUnitVisibility() {
+  var needAtTime = schedUnit === 'day' || schedUnit === 'week' || schedUnit === 'month';
+  document.getElementById('schedAtTimeRow').style.display = needAtTime ? '' : 'none';
+  // 周/月模式 interval 由日期集合表达，隐藏间隔输入
+  document.getElementById('schedIntervalRow').style.display = (schedUnit === 'week' || schedUnit === 'month') ? 'none' : '';
+  document.getElementById('schedWeekdaysRow').style.display = schedUnit === 'week' ? '' : 'none';
+  document.getElementById('schedMonthDaysRow').style.display = schedUnit === 'month' ? '' : 'none';
+}
+
+function syncChipSelection() {
+  document.querySelectorAll('#schedWeekdays .chip').forEach(function(c) {
+    c.classList.toggle('active', schedWeekdays.indexOf(parseInt(c.dataset.day)) !== -1);
+  });
+  document.querySelectorAll('#schedMonthDays .chip').forEach(function(c) {
+    c.classList.toggle('active', schedMonthDays.indexOf(parseInt(c.dataset.day)) !== -1);
+  });
+}
+
+function buildMonthDayChips() {
+  var box = document.getElementById('schedMonthDays');
+  if (box.children.length > 0) return;
+  var html = '';
+  for (var d = 1; d <= 31; d++) html += '<div class="chip" data-day="' + d + '">' + d + '</div>';
+  box.innerHTML = html;
+  box.querySelectorAll('.chip').forEach(function(c) {
+    c.addEventListener('click', function() {
+      var day = parseInt(this.dataset.day);
+      var idx = schedMonthDays.indexOf(day);
+      if (idx >= 0) schedMonthDays.splice(idx, 1); else schedMonthDays.push(day);
+      syncChipSelection();
+    });
+  });
+}
+
+// ---- 群搜索（模态框内） ----
+async function schedDoSearch() {
+  var q = document.getElementById('schedSearchInput').value.trim();
+  if (!q) return;
+  var btn = document.getElementById('schedSearchBtn');
+  btn.disabled = true; btn.textContent = '搜索中...';
+  try {
+    schedSearchResults = await invoke('search_groups', { query: q });
+    renderSchedGroups();
+  } catch(e) {
+    document.getElementById('schedGroupList').innerHTML = '<div class="empty" style="color:var(--red);">搜索失败: ' + escapeHtml(String(e)) + '</div>';
+  }
+  btn.disabled = false; btn.textContent = '搜索';
+}
+
+function renderSchedGroups() {
+  var list = document.getElementById('schedGroupList');
+  if (!schedSearchResults || schedSearchResults.length === 0) {
+    list.innerHTML = '<div class="empty">未找到匹配的群</div>';
+    return;
+  }
+  list.innerHTML = schedSearchResults.map(function(g, i) {
+    var selected = schedSelectedGroups.some(function(x) { return x.openConversationId === g.openConversationId; });
+    return '<div class="group-item' + (selected ? ' selected' : '') + '" data-idx="' + i + '">' +
+      '<div class="gicon">' + escapeHtml(initials(g.title || '?')) + '</div>' +
+      '<div class="ginfo">' +
+        '<div class="gname">' + escapeHtml(g.title) + '</div>' +
+        '<div class="gmeta">' + (g.memberCount || 0) + ' 人' + (g.createAt ? ' · 创建于 ' + escapeHtml(String(g.createAt).substring(0,10)) : '') + '</div>' +
+      '</div>' +
+      '<div class="check"></div>' +
+    '</div>';
+  }).join('');
+  list.querySelectorAll('.group-item').forEach(function(item) {
+    item.addEventListener('click', function() { schedToggleGroup(this, parseInt(this.dataset.idx)); });
+  });
+}
+
+function schedToggleGroup(el, idx) {
+  var g = schedSearchResults[idx];
+  if (!g) return;
+  var existing = schedSelectedGroups.findIndex(function(x) { return x.openConversationId === g.openConversationId; });
+  if (existing >= 0) {
+    schedSelectedGroups.splice(existing, 1);
+    el.classList.remove('selected');
+  } else {
+    // 创建时冲突预警：该群已被其他定时任务引用则提示（保存时后端会硬拒绝）
+    var conflict = findGroupConflict(g.openConversationId);
+    if (conflict && !confirm('群「' + g.title + '」已被定时任务「' + conflict + '」引用。\n\n同一群只允许被一个定时任务管理，保存时会被拒绝。仍要加入吗？')) {
+      return;
+    }
+    schedSelectedGroups.push({ title: g.title, openConversationId: g.openConversationId, createAt: g.createAt || null });
+    el.classList.add('selected');
+  }
+  renderSchedSelectedChips();
+}
+
+function findGroupConflict(openConversationId) {
+  for (var i = 0; i < allSchedules.length; i++) {
+    var s = allSchedules[i];
+    if (s.id === editingScheduleId) continue;
+    var hit = (s.groups || []).some(function(g) { return g.openConversationId === openConversationId; });
+    if (hit) return s.name;
+  }
+  return null;
+}
+
+function renderSchedSelectedChips() {
+  var box = document.getElementById('schedSelectedChips');
+  if (schedSelectedGroups.length === 0) {
+    box.innerHTML = '<span style="font-size:12px;color:var(--sub);">未选择群</span>';
+    return;
+  }
+  box.innerHTML = '<span style="font-size:12px;color:var(--sub);align-self:center;">已选 ' + schedSelectedGroups.length + ' 个：</span>' +
+    schedSelectedGroups.map(function(g, i) {
+      return '<span class="sched-chip">' + escapeHtml(g.title) + ' <b class="chip-remove" data-i="' + i + '" style="cursor:pointer;color:var(--red);margin-left:4px;">×</b></span>';
+    }).join('');
+  box.querySelectorAll('.chip-remove').forEach(function(b) {
+    b.addEventListener('click', function() {
+      schedSelectedGroups.splice(parseInt(this.dataset.i), 1);
+      renderSchedSelectedChips();
+      renderSchedGroups();
+    });
+  });
+}
+
+// ---- 收集表单 -> Schedule 对象 ----
+function collectScheduleForm() {
+  var name = document.getElementById('schedName').value.trim();
+  if (!name) throw new Error('请填写任务名称');
+  if (schedSelectedGroups.length === 0) throw new Error('请至少选择一个群');
+
+  var startTime = fromLocalInputValue(document.getElementById('schedStartTime').value.trim());
+  if (!startTime) startTime = nowBeijingString();
+
+  var config;
+  if (schedMode === 'cron') {
+    config = {
+      mode: 'cron',
+      unit: null,
+      interval: 1,
+      weekdays: [],
+      monthDays: [],
+      atTime: null,
+      startTime: startTime,
+      cron: document.getElementById('schedCron').value.trim()
+    };
+    if (!config.cron) throw new Error('请填写 cron 表达式');
+  } else {
+    var interval = parseInt(document.getElementById('schedInterval').value) || 1;
+    var atTime = null;
+    if (schedUnit === 'day' || schedUnit === 'week' || schedUnit === 'month') {
+      atTime = document.getElementById('schedAtTime').value;
+      if (!atTime) throw new Error('请选择触发时刻');
+    }
+    config = {
+      mode: 'simple',
+      unit: schedUnit,
+      interval: interval,
+      weekdays: schedUnit === 'week' ? schedWeekdays.slice() : [],
+      monthDays: schedUnit === 'month' ? schedMonthDays.slice() : [],
+      atTime: atTime,
+      startTime: startTime,
+      cron: ''
+    };
+  }
+
+  var earliest = fromLocalInputValue(document.getElementById('schedEarliestDate').value.trim());
+  var outputRoot = document.getElementById('schedOutputPath').dataset.value || '';
+
+  return {
+    id: editingScheduleId,
+    name: name,
+    enabled: true,
+    groups: schedSelectedGroups.map(function(g) {
+      return { title: g.title, openConversationId: g.openConversationId, createAt: g.createAt || null };
+    }),
+    outputRoot: outputRoot || null,
+    earliestChatDate: earliest || null,
+    schedule: config,
+    lastSuccessAt: null,
+    lastRunAt: null,
+    nextRunAt: null,
+    runCount: 0,
+    runs: []
+  };
+}
+
+// ---- 预览 ----
+async function schedPreview() {
+  var box = document.getElementById('schedPreviewBox');
+  var payload;
+  try {
+    payload = collectScheduleForm();
+  } catch(e) {
+    // 预览只需 schedule 配置，群校验失败也允许预览
+    var startTime = fromLocalInputValue(document.getElementById('schedStartTime').value.trim()) || nowBeijingString();
+    var config;
+    if (schedMode === 'cron') {
+      config = { mode:'cron', unit:null, interval:1, weekdays:[], monthDays:[], atTime:null, startTime:startTime, cron: document.getElementById('schedCron').value.trim() };
+    } else {
+      var atTime = (schedUnit === 'minute' || schedUnit === 'hour') ? null : document.getElementById('schedAtTime').value;
+      config = {
+        mode:'simple', unit:schedUnit,
+        interval: parseInt(document.getElementById('schedInterval').value) || 1,
+        weekdays: schedUnit === 'week' ? schedWeekdays.slice() : [],
+        monthDays: schedUnit === 'month' ? schedMonthDays.slice() : [],
+        atTime: atTime, startTime: startTime, cron:''
+      };
+    }
+    payload = { id:'', name:'preview', enabled:true, groups:[{title:'x',openConversationId:'x',createAt:null}], outputRoot:null, earliestChatDate:null, schedule:config, lastSuccessAt:null, lastRunAt:null, nextRunAt:null, runCount:0, runs:[] };
+  }
+  box.style.display = '';
+  box.innerHTML = '<div class="empty">计算中...</div>';
+  try {
+    var times = await invoke('preview_schedule', { config: payload.schedule });
+    box.innerHTML = '<b>未来 3 次触发（北京时间）：</b><br>' + times.map(function(t) { return '· ' + escapeHtml(t); }).join('<br>');
+  } catch(e) {
+    box.innerHTML = '<span style="color:var(--red);">配置无效：' + escapeHtml(String(e)) + '</span>';
+  }
+}
+
+// ---- 保存 ----
+async function schedSave() {
+  var btn = document.getElementById('schedSaveBtn');
+  var payload;
+  try {
+    payload = collectScheduleForm();
+  } catch(e) {
+    alert(String(e));
+    return;
+  }
+  btn.disabled = true; btn.textContent = '保存中...';
+  try {
+    // 先做预校验（同群冲突在保存时也会拦截，这里提前给出明确提示）
+    await invoke('validate_schedule', { schedule: payload });
+    var saved = await invoke('save_schedule', { schedule: payload });
+    closeScheduleModal();
+    loadSchedules();
+    alert('任务「' + saved.name + '」已保存。\n下次运行：' + (saved.nextRunAt || '计算中'));
+  } catch(e) {
+    alert('保存失败: ' + e);
+  } finally {
+    btn.disabled = false; btn.textContent = '保存任务';
+  }
+}
+
+async function schedChooseDir() {
+  try {
+    var selected = await invoke('choose_output_dir');
+    if (selected) {
+      document.getElementById('schedOutputPath').textContent = selected;
+      document.getElementById('schedOutputPath').dataset.value = selected;
+    }
+  } catch(e) {
+    alert('选择目录失败: ' + e);
+  }
+}
+
 // ============ 工具函数 ============
 function escapeHtml(s) {
   return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
@@ -1036,6 +1726,38 @@ document.getElementById('openLogDirBtn').addEventListener('click', openLogDir);
 document.getElementById('settingsChooseDirBtn').addEventListener('click', settingsChooseDir);
 document.getElementById('saveSettingsBtn').addEventListener('click', saveSettings);
 document.getElementById('resetSettingsBtn').addEventListener('click', resetSettings);
+
+// 定时任务页
+document.getElementById('newScheduleBtn').addEventListener('click', function() { openScheduleModal(''); });
+document.getElementById('scheduleModalClose').addEventListener('click', closeScheduleModal);
+document.getElementById('schedCancelBtn').addEventListener('click', closeScheduleModal);
+document.getElementById('scheduleModal').addEventListener('click', function(e) { if (e.target === this) closeScheduleModal(); });
+document.getElementById('schedSaveBtn').addEventListener('click', schedSave);
+document.getElementById('schedPreviewBtn').addEventListener('click', schedPreview);
+document.getElementById('schedChooseDirBtn').addEventListener('click', schedChooseDir);
+document.getElementById('schedSearchBtn').addEventListener('click', schedDoSearch);
+document.getElementById('schedSearchInput').addEventListener('keydown', function(e) { if (e.key === 'Enter') schedDoSearch(); });
+document.querySelectorAll('#schedModeSeg button').forEach(function(b) {
+  b.addEventListener('click', function() { setSchedMode(this.dataset.mode); });
+});
+document.querySelectorAll('#schedUnitSeg button').forEach(function(b) {
+  b.addEventListener('click', function() { setSchedUnit(this.dataset.unit); });
+});
+document.querySelectorAll('#schedWeekdays .chip').forEach(function(c) {
+  c.addEventListener('click', function() {
+    var day = parseInt(this.dataset.day);
+    var idx = schedWeekdays.indexOf(day);
+    if (idx >= 0) schedWeekdays.splice(idx, 1); else schedWeekdays.push(day);
+    syncChipSelection();
+  });
+});
+buildMonthDayChips();
+document.getElementById('runsModalClose').addEventListener('click', function() {
+  document.getElementById('runsModal').classList.remove('show');
+});
+document.getElementById('runsModal').addEventListener('click', function(e) {
+  if (e.target === this) this.classList.remove('show');
+});
 
 init();
 </script>

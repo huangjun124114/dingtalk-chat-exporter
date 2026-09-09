@@ -76,6 +76,26 @@ pub(crate) fn epoch_days_to_ymd(days: i64) -> (i32, u32, u32) {
     (year as i32, month as u32, day as u32)
 }
 
+/// epoch_days_to_ymd 的逆运算：公历日期 → Unix 纪元天数。
+pub(crate) fn ymd_to_epoch_days(year: i32, month: u32, day: u32) -> i64 {
+    let y = if month <= 2 {
+        i64::from(year) - 1
+    } else {
+        i64::from(year)
+    };
+    let era = if y >= 0 { y / 400 } else { (y - 399) / 400 };
+    let year_of_era = y - era * 400;
+    let m = i64::from(month);
+    let day_of_year = (153 * (if m > 2 { m - 3 } else { m + 9 }) + 2) / 5 + i64::from(day) - 1;
+    let day_of_era = year_of_era * 365 + year_of_era / 4 - year_of_era / 100 + day_of_year;
+    era * 146_097 + day_of_era - 719_468
+}
+
+/// 校验 "yyyy-MM-dd HH:mm:ss" 字符串是否合法（cron / 调度时间校验用）。
+pub(crate) fn is_valid_datetime(value: &str) -> bool {
+    parse_dws_datetime(value).is_some()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -88,4 +108,22 @@ mod tests {
         assert!(parse_dws_datetime("2024-02-29 12:34:56").is_some());
     }
 
+    #[test]
+    fn ymd_epoch_days_round_trip() {
+        // 已知锚点：1970-01-01 = 0，2000-03-01 = 11017
+        assert_eq!(ymd_to_epoch_days(1970, 1, 1), 0);
+        assert_eq!(ymd_to_epoch_days(2000, 3, 1), 11_017);
+        // 双向互逆（覆盖闰年与世纪边界）
+        for days in [-719_162_i64, -1, 0, 11_017, 18_262, 20_454, 20_819] {
+            let (year, month, day) = epoch_days_to_ymd(days);
+            assert_eq!(ymd_to_epoch_days(year, month, day), days, "days={days}");
+        }
+    }
+
+    #[test]
+    fn is_valid_datetime_rejects_bad_input() {
+        assert!(is_valid_datetime("2026-09-09 15:47:00"));
+        assert!(!is_valid_datetime("bad"));
+        assert!(!is_valid_datetime("2026-13-09 15:47:00"));
+    }
 }

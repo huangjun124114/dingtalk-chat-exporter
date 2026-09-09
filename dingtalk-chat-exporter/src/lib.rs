@@ -1,16 +1,23 @@
+// 定时导出功能开发中：cron/schedule 模块将被 scheduler（后台调度引擎）使用
+#![allow(dead_code)]
+
 // 钉钉群聊导出器 - Tauri 后端
 
+mod cron;
 mod date;
 mod dws;
 mod export_log;
+mod exporter;
 mod media;
+mod schedule;
 mod settings;
 mod viewer;
 
-use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
+pub use exporter::stable_hash;
+use exporter::GroupExportRequest;
+
+use serde::Serialize;
 use std::fs;
-use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -423,15 +430,6 @@ fn cancel_export(state: State<'_, AppState>) -> Result<(), String> {
     Ok(())
 }
 
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct GroupExportRequest {
-    pub title: String,
-    pub open_conversation_id: String,
-    #[serde(default)]
-    pub create_at: Option<String>,
-}
-
 #[tauri::command]
 fn snapshot(state: State<'_, AppState>, log_from: Option<usize>) -> AppSnapshot {
     match state.inner.lock() {
@@ -494,406 +492,65 @@ fn run_export(
     start_time: Option<String>,
     end_time: Option<String>,
 ) {
-    let root = PathBuf::from(&output_root);
-    let log = |message: &str| append_log(&state, message);
-    let set_progress = |text: String| set_task_progress(&state, text);
-    let mut errors = Vec::new();
-    let mut published_groups = 0usize;
+    let job = exporter::ExportJob {
+        groups,
+        output_root: output_root.clone(),
+        self_name,
+        start_time,
+        end_time,
+        trigger: exporter::Trigger::Manual,
+        archive: Box::new(exporter::PerRunArchive),
+        cancel: cancel_requested,
+    };
+    let progress = TaskProgress {
+        state: state.clone(),
+    };
+    let outcome = exporter::run_job(&job, &progress);
 
-    if let Err(error) = fs::create_dir_all(&root) {
-        finish_task(
-            &state,
-            "error",
-            format!("创建输出目录失败: {}", error),
-            Some(format!("创建输出目录 {} 失败: {}", root.display(), error)),
-            None,
-        );
-        return;
-    }
-
-    for (group_index, group) in groups.iter().enumerate() {
-        if cancel_requested.load(Ordering::Relaxed) {
-            break;
+    match outcome.status.as_str() {
+        "cancelled" => {
+            append_log(&state, "导出已由用户取消；已导出内容保留在对应目录中");
+            finish_task(&state, "cancelled", "导出已取消".into(), None, Some(output_root));
         }
-        log(&format!(
-            "\n===== [{}/{}] 导出群: {} =====",
-            group_index + 1,
-            groups.len(),
-            group.title
-        ));
-        set_progress(format!(
-            "[{}/{}] 正在导出: {}",
-            group_index + 1,
-            groups.len(),
-            group.title
-        ));
-
-        // 生成目录名称：{群名}_{MMDD}_{HHMMSS}
-        let now = dws::current_time_str();
-        let (month_day, hour_min_sec) = if now.len() >= 19 {
-            // 格式: "2026-01-15 10:30:00"
-            let md = now[5..10].replace("-", ""); // "0115"
-            let hms = now[11..19].replace(":", ""); // "103000"
-            (md, hms)
-        } else {
-            ("0000".to_string(), "000000".to_string())
-        };
-        let group_directory_name = format!(
-            "{}_{}_{}",
-            sanitize_filename(&group.title),
-            month_day,
-            hour_min_sec
-        );
-        let group_dir = root.join(&group_directory_name);
-        let attachment_dir = group_dir.join("attachments");
-        
-        if let Err(error) = fs::create_dir_all(&attachment_dir) {
-            record_error(
-                &log,
-                &mut errors,
-                format!("群「{}」创建目录失败: {}", group.title, error),
-            );
-            continue;
-        }
-        let group_error_start = errors.len();
-
-        let progress_state = state.clone();
-        let diagnostic_state = state.clone();
-        
-        // 记录本次导出的时间范围信息
-        if let Some(ref st) = start_time {
-            log(&format!("群「{}」开始时间: {}", group.title, st));
-        } else {
-            log(&format!("群「{}」未设置开始时间，从最早消息开始", group.title));
-        }
-        if let Some(ref et) = end_time {
-            log(&format!("群「{}」结束时间: {}", group.title, et));
-        } else {
-            log(&format!("群「{}」未设置结束时间，到最新消息结束", group.title));
-        }
-
-        let messages = match dws::fetch_all_messages(
-            &group.open_conversation_id,
-            start_time.as_deref(),
-            end_time.as_deref(),
-            &|count, earliest| {
-                set_task_progress(
-                    &progress_state,
-                    format!("拉取消息: {} 条（至 {}）", count, earliest),
-                );
-            },
-            &|message| append_log(&diagnostic_state, message),
-            &cancel_requested,
-        ) {
-            Ok(messages) => messages,
-            Err(error) if error == dws::CANCELLED_ERROR => break,
-            Err(error) => {
-                record_error(
-                    &log,
-                    &mut errors,
-                    format!("群「{}」拉取消息失败: {}", group.title, error),
-                );
-                continue;
-            }
-        };
-        log(&format!("共拉取 {} 条消息（含话题回复）", messages.len()));
-        
-        // 记录实际的消息时间范围
-        let actual_earliest = messages.first().map(|m| m.create_time.clone());
-        let actual_latest = messages.last().map(|m| m.create_time.clone());
-        if let Some(ref earliest) = actual_earliest {
-            log(&format!("实际最早消息: {}", earliest));
-        }
-        if let Some(ref latest) = actual_latest {
-            log(&format!("实际最新消息: {}", latest));
-        }
-
-        if let Err(error) = write_json(&group_dir.join("messages.json"), &messages) {
-            record_error(
-                &log,
-                &mut errors,
-                format!("群「{}」写 messages.json 失败: {}", group.title, error),
-            );
-            continue;
-        }
-
-        let media_count: usize = messages
-            .iter()
-            .map(|message| media::extract_media_ids(&message.content).len())
-            .sum();
-        let mut media_index = 0usize;
-        let mut attachments = Vec::with_capacity(media_count);
-        if media_count > 0 {
-            log(&format!("开始下载 {} 个附件", media_count));
-        }
-
-        for message in &messages {
-            for (file_index, media_id) in media::extract_media_ids(&message.content)
-                .into_iter()
-                .enumerate()
-            {
-                if cancel_requested.load(Ordering::Relaxed) {
-                    break;
-                }
-                media_index += 1;
-                let extension = media_extension(&message.content);
-                let file_name = format!(
-                    "{}_{}_{}_{}.{}",
-                    timestamp_fragment(&message.create_time),
-                    safe_id_fragment(&message.open_message_id, 16),
-                    file_index + 1,
-                    safe_id_fragment(&media_id, 10),
-                    extension
-                );
-                
-                // 按年月分目录存储附件
-                let year_month = extract_year_month(&message.create_time);
-                let attachment_subdir = attachment_dir.join(&year_month);
-                if let Err(e) = fs::create_dir_all(&attachment_subdir) {
-                    let detail = format!("创建附件目录失败 {}: {}", attachment_subdir.display(), e);
-                    log(&detail);
-                    errors.push(detail);
-                    continue;
-                }
-                let output_path = attachment_subdir.join(&file_name);
-                
-                set_progress(format!(
-                    "[{}/{}] 下载附件: {}",
-                    media_index, media_count, file_name
-                ));
-
-                let result = dws::download_media(
-                    &group.open_conversation_id,
-                    &message.open_message_id,
-                    &media_id,
-                    &output_path,
-                    &cancel_requested,
-                );
-                let (status, error_text) = match result {
-                    Ok(()) => ("ok", None),
-                    Err(error) if error == dws::CANCELLED_ERROR => ("cancelled", Some(error)),
-                    Err(error) => {
-                        let detail = format!(
-                            "群「{}」附件 #{} 下载失败: {}",
-                            group.title, media_index, error
-                        );
-                        log(&detail);
-                        errors.push(detail);
-                        ("fail", Some(error))
-                    }
-                };
-                // 记录相对路径（包含年月子目录）
-                let relative_file_path = format!("{}/{}", year_month, file_name);
-                attachments.push(serde_json::json!({
-                    "openMessageId": message.open_message_id,
-                    "createTime": message.create_time,
-                    "sender": message.sender,
-                    "mediaId": media_id,
-                    "file": relative_file_path,
-                    "originalFileName": media::extract_original_file_name(&message.content)
-                        .map(|name| sanitize_filename(&name)),
-                    "status": status,
-                    "error": error_text,
-                }));
-                if status == "cancelled" {
-                    break;
-                }
-            }
-            if cancel_requested.load(Ordering::Relaxed) {
-                break;
-            }
-        }
-
-        if cancel_requested.load(Ordering::Relaxed) {
-            if let Err(error) =
-                write_json(&group_dir.join("attachments_index.json"), &attachments)
-            {
-                log(&format!("保存断点附件索引失败: {error}"));
-            }
-            break;
-        }
-
-        if let Err(error) = write_json(&group_dir.join("attachments_index.json"), &attachments) {
-            record_error(
-                &log,
-                &mut errors,
-                format!(
-                    "群「{}」写 attachments_index.json 失败: {}",
-                    group.title, error
-                ),
-            );
-            continue;
-        }
-        let successful_attachments = attachments
-            .iter()
-            .filter(|attachment| attachment["status"] == "ok")
-            .count();
-        log(&format!(
-            "附件下载完成: 成功 {}/{}",
-            successful_attachments, media_count
-        ));
-
-        // 按月份分组消息
-        set_progress("按月份分组消息...".to_string());
-        let mut messages_by_month: BTreeMap<String, Vec<&dws::Message>> = BTreeMap::new();
-        for message in &messages {
-            let year_month = extract_year_month(&message.create_time);
-            messages_by_month.entry(year_month).or_default().push(message);
-        }
-        
-        log(&format!("消息分布在 {} 个月份", messages_by_month.len()));
-        
-        // 为每个月生成独立的 HTML 文件
-        let mut html_files_info: Vec<export_log::HtmlFileInfo> = Vec::new();
-        let mut html_file_count = 0;
-        
-        for (year_month, month_messages) in &messages_by_month {
-            if cancel_requested.load(Ordering::Relaxed) {
-                break;
-            }
-            
-            html_file_count += 1;
-            set_progress(format!("生成 {} 年 {} 月聊天记录...", 
-                &year_month[0..4], &year_month[4..6]));
-            
-            // 解析为 Message 向量
-            let messages_vec: Vec<dws::Message> = month_messages.iter().map(|m| (*m).clone()).collect();
-            
-            // 生成文件名（处理重名）
-            let html_file_name = resolve_html_filename(&group.title, year_month, &group_dir);
-            let html_path = group_dir.join(&html_file_name);
-            
-            // 统计该月的附件数
-            let month_attachment_count: usize = month_messages.iter()
-                .map(|m| media::extract_media_ids(&m.content).len())
-                .sum();
-            
-            match viewer::generate_html(
-                &messages_vec,
-                &group.title,
-                &attachment_dir,
-                &self_name,
-                &html_path,
-                &cancel_requested,
-            ) {
-                Ok(()) => {
-                    let file_size = html_path.metadata()
-                        .map(|m| m.len())
-                        .unwrap_or(0);
-                    log(&format!(
-                        "已生成: {}（{} 条消息, {} 个附件, {:.1} MB）",
-                        html_file_name,
-                        month_messages.len(),
-                        month_attachment_count,
-                        file_size as f64 / 1_048_576.0
-                    ));
-                    html_files_info.push(export_log::HtmlFileInfo {
-                        filename: html_file_name.clone(),
-                        year_month: year_month.clone(),
-                        message_count: month_messages.len(),
-                        attachment_count: month_attachment_count,
-                        file_size_bytes: file_size,
-                    });
-                },
-                Err(error) if error == dws::CANCELLED_ERROR => break,
-                Err(error) => {
-                    record_error(
-                        &log,
-                        &mut errors,
-                        format!("群「{}」生成 {} 年 {} 月 HTML 失败: {}", 
-                            group.title, &year_month[0..4], &year_month[4..6], error),
-                    );
-                }
-            }
-        }
-        
-        log(&format!("共生成 {} 个月度 HTML 文件", html_file_count));
-
-        if cancel_requested.load(Ordering::Relaxed) {
-            break;
-        }
-
-        published_groups += 1;
-        log(&format!(
-            "群「{}」已完整发布到 {}",
-            group.title,
-            group_dir.display()
-        ));
-        
-        // 写入导出日志
-        let success_attachments: usize = attachments.iter()
-            .filter(|a| a["status"] == "ok")
-            .count();
-        let failed_attachments: usize = attachments.iter()
-            .filter(|a| a["status"] == "fail")
-            .count();
-        
-        // 获取当前时间字符串（复用 dws 模块的函数）
-        let export_time = dws::current_time_str();
-        
-        // 收集日志行
-        let log_lines: Vec<String> = state.lock()
-            .ok()
-            .and_then(|inner| inner.task.as_ref().map(|t| t.log.clone()))
-            .unwrap_or_default();
-        
-        let log_entry = export_log::ExportLogEntry {
-            id: export_log::generate_timestamp_id(),
-            group_name: group.title.clone(),
-            group_id: group.open_conversation_id.clone(),
-            directory_name: group_directory_name.clone(),
-            export_time: export_time.clone(),
-            start_time: start_time.clone(),
-            end_time: end_time.clone(),
-            actual_earliest: actual_earliest.clone(),
-            actual_latest: actual_latest.clone(),
-            message_count: messages.len(),
-            attachment_total: success_attachments + failed_attachments,
-            attachment_success: success_attachments,
-            attachment_failed: failed_attachments,
-            html_files: html_files_info.clone(),
-            status: if errors.len() == group_error_start { "success".to_string() } else { "partial".to_string() },
-            error_message: if errors.len() > group_error_start {
-                Some(errors[group_error_start..].join("; "))
-            } else {
-                None
-            },
-            log_lines: log_lines.clone(),
-        };
-        
-        if let Err(e) = export_log::append_export_log(&group_dir, &log_entry) {
-            log(&format!("警告: 写入导出日志失败: {}", e));
-        }
-    }
-
-    if cancel_requested.load(Ordering::Relaxed) {
-        log("导出已由用户取消；已导出内容保留在对应目录中");
-        finish_task(
-            &state,
-            "cancelled",
-            "导出已取消".into(),
-            None,
-            Some(output_root),
-        );
-    } else if errors.is_empty() {
-        finish_task(
+        "done" => finish_task(
             &state,
             "done",
-            format!("导出完成，共 {} 个群", published_groups),
+            format!("导出完成，共 {} 个群", outcome.groups.len()),
             None,
             Some(output_root),
-        );
-    } else {
-        finish_task(
+        ),
+        _ => finish_task(
             &state,
             "error",
-            format!("导出结束，有 {} 个错误", errors.len()),
-            Some(errors.join("\n")),
+            format!("导出结束，有 {} 个错误", outcome.all_errors.len()),
+            Some(outcome.all_errors.join("\n")),
             Some(output_root),
-        );
+        ),
     }
 }
 
+/// 将 exporter 核心的进度/日志回写到 Tauri 任务状态
+struct TaskProgress {
+    state: Arc<Mutex<AppInner>>,
+}
+
+impl exporter::ExportProgress for TaskProgress {
+    fn log(&self, message: &str) {
+        append_log(&self.state, message);
+    }
+
+    fn progress(&self, text: String) {
+        set_task_progress(&self.state, text);
+    }
+
+    fn log_snapshot(&self) -> Vec<String> {
+        self.state
+            .lock()
+            .ok()
+            .and_then(|inner| inner.task.as_ref().map(|task| task.log.clone()))
+            .unwrap_or_default()
+    }
+}
 
 fn append_log(state: &Arc<Mutex<AppInner>>, message: &str) {
     if let Ok(mut inner) = state.lock() {
@@ -931,27 +588,6 @@ fn finish_task(
             task.output_path = output_path;
         }
     }
-}
-
-fn record_error(log: &dyn Fn(&str), errors: &mut Vec<String>, error: String) {
-    log(&error);
-    errors.push(error);
-}
-
-fn write_json(path: &Path, value: &impl Serialize) -> Result<(), String> {
-    // 原子写入：先写入临时文件，成功后再重命名到目标路径
-    let temp_path = path.with_extension("tmp");
-    let file = fs::File::create(&temp_path)
-        .map_err(|error| format!("创建 {} 失败: {}", temp_path.display(), error))?;
-    let mut writer = std::io::BufWriter::new(file);
-    serde_json::to_writer_pretty(&mut writer, value)
-        .map_err(|error| format!("序列化 {} 失败: {}", temp_path.display(), error))?;
-    writer
-        .flush()
-        .map_err(|error| format!("刷新 {} 失败: {}", temp_path.display(), error))?;
-    drop(writer); // 确保文件句柄关闭
-    fs::rename(&temp_path, path)
-        .map_err(|error| format!("重命名 {} 失败: {}", temp_path.display(), error))
 }
 
 fn diagnostic_home_paths() -> Vec<String> {
@@ -1101,163 +737,6 @@ fn lock_error<T>(_: std::sync::PoisonError<T>) -> String {
     "应用状态异常，请重启程序".into()
 }
 
-fn media_extension(content: &str) -> String {
-    if let Some(file_name) = media::extract_original_file_name(content) {
-        if let Some(extension) = Path::new(&file_name)
-            .extension()
-            .and_then(|extension| extension.to_str())
-            .filter(|extension| {
-                !extension.is_empty()
-                    && extension.len() <= 12
-                    && extension
-                        .chars()
-                        .all(|character| character.is_ascii_alphanumeric())
-            })
-        {
-            return extension.to_ascii_lowercase();
-        }
-    }
-    if content.contains("[视频消息]") {
-        "mp4".into()
-    } else if content.contains("[图片消息]") {
-        "jpg".into()
-    } else if content.contains("[语音消息]") || content.contains("[音频消息]") {
-        "m4a".into()
-    } else {
-        "bin".into()
-    }
-}
-
-fn timestamp_fragment(timestamp: &str) -> String {
-    let fragment: String = timestamp
-        .chars()
-        .map(|character| {
-            if character.is_ascii_alphanumeric() {
-                character
-            } else {
-                '_'
-            }
-        })
-        .take(32)
-        .collect();
-    fragment.trim_matches('_').to_string()
-}
-
-fn sanitize_filename(name: &str) -> String {
-    let mut sanitized: String = name
-        .chars()
-        .filter(|character| {
-            !character.is_control()
-                && !matches!(
-                    character,
-                    '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|'
-                )
-        })
-        .take(80)
-        .collect::<String>()
-        .trim()
-        .trim_end_matches(['.', ' '])
-        .to_string();
-    if sanitized.is_empty() {
-        sanitized = "群聊".into();
-    }
-    let stem = sanitized
-        .split('.')
-        .next()
-        .unwrap_or("")
-        .to_ascii_uppercase();
-    let reserved = matches!(
-        stem.as_str(),
-        "CON"
-            | "PRN"
-            | "AUX"
-            | "NUL"
-            | "COM1"
-            | "COM2"
-            | "COM3"
-            | "COM4"
-            | "COM5"
-            | "COM6"
-            | "COM7"
-            | "COM8"
-            | "COM9"
-            | "LPT1"
-            | "LPT2"
-            | "LPT3"
-            | "LPT4"
-            | "LPT5"
-            | "LPT6"
-            | "LPT7"
-            | "LPT8"
-            | "LPT9"
-            | "COM¹"
-            | "COM²"
-            | "COM³"
-            | "LPT¹"
-            | "LPT²"
-            | "LPT³"
-    );
-    if reserved {
-        sanitized.insert(0, '_');
-    }
-    sanitized
-}
-
-/// 从日期时间字符串提取年月（YYYYMM 格式）
-/// 输入格式: "2025-01-15 10:30:00" → 输出: "202501"
-fn extract_year_month(datetime: &str) -> String {
-    crate::date::extract_year_month(datetime).unwrap_or_else(|| "unknown".to_string())
-}
-
-/// 生成 HTML 文件名，处理重名情况
-/// 规则：群名-YYYYMM.html，重名时添加序号 -01, -02...
-fn resolve_html_filename(group_title: &str, year_month: &str, group_dir: &Path) -> String {
-    let safe_title = sanitize_filename(group_title);
-    let base_filename = format!("{}-{}.html", safe_title, year_month);
-    
-    // 如果文件不存在，直接返回基础文件名
-    if !group_dir.join(&base_filename).exists() {
-        return base_filename;
-    }
-    
-    // 文件已存在，尝试添加序号
-    for seq in 1..=999 {
-        let candidate = format!("{}-{}-{:02}.html", safe_title, year_month, seq);
-        if !group_dir.join(&candidate).exists() {
-            return candidate;
-        }
-    }
-    
-    // 极端情况：生成带时间戳的文件名
-    let timestamp = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs();
-    format!("{}-{}-{}.html", safe_title, year_month, timestamp)
-}
-
-fn safe_id_fragment(id: &str, max_length: usize) -> String {
-    let fragment: String = id
-        .chars()
-        .filter(|character| character.is_ascii_alphanumeric())
-        .take(max_length)
-        .collect();
-    if fragment.is_empty() {
-        "unknown".into()
-    } else {
-        fragment
-    }
-}
-
-pub fn stable_hash(value: &str) -> u64 {
-    let mut hash = 0xcbf2_9ce4_8422_2325_u64;
-    for byte in value.as_bytes() {
-        hash ^= u64::from(*byte);
-        hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
-    }
-    hash
-}
-
 #[tauri::command]
 fn get_settings() -> Result<settings::AppSettings, String> {
     settings::load_settings()
@@ -1395,44 +874,9 @@ mod tests {
     }
 
     #[test]
-    fn unsafe_ids_cannot_create_paths() {
-        assert_eq!(safe_id_fragment("../../a/b+c=", 20), "abc");
-        assert_eq!(safe_id_fragment("中文", 20), "unknown");
-        assert_ne!(
-            stable_hash("cid/same-prefix/a"),
-            stable_hash("cid/same-prefix/b")
-        );
-    }
-
     #[test]
-    fn sanitizes_windows_reserved_names() {
-        assert_eq!(sanitize_filename("CON"), "_CON");
-        assert_eq!(sanitize_filename("COM¹.txt"), "_COM¹.txt");
-        assert_eq!(sanitize_filename("LPT³"), "_LPT³");
-        assert_eq!(sanitize_filename("../测试:*?"), "..测试");
-    }
-
     #[test]
-    fn resolve_html_filename_uses_sanitized_group_title() {
-        let temp_dir = std::path::PathBuf::from("temp");
-        assert_eq!(resolve_html_filename("研发/值班:日报*?", "202601", &temp_dir), "研发值班日报-202601.html");
-        assert_eq!(resolve_html_filename("CON", "202601", &temp_dir), "_CON-202601.html");
-        assert_eq!(resolve_html_filename("... ", "202601", &temp_dir), "群聊-202601.html");
-    }
-
     #[test]
-    fn preserves_declared_file_extension() {
-        assert_eq!(
-            media_extension("[文件消息](fileName=季度报告.PDF, mediaId=x)"),
-            "pdf"
-        );
-        assert_eq!(media_extension("[语音消息](mediaId=x)"), "m4a");
-        assert_eq!(
-            media_extension("[文件消息](fileName=报告(终版).PDF, mediaId=x)"),
-            "pdf"
-        );
-    }
-
     #[test]
     fn log_offset_tracks_evicted_lines() {
         let state = Arc::new(Mutex::new(AppInner {

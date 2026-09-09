@@ -59,6 +59,12 @@ pub struct ExportLogEntry {
     pub error_message: Option<String>,
     /// 导出过程的日志行
     pub log_lines: Vec<String>,
+    /// 触发类型（manual / scheduled）；旧日志无此字段时为 None
+    #[serde(default)]
+    pub trigger_type: Option<String>,
+    /// 触发该导出的定时任务 ID（仅 scheduled）
+    #[serde(default)]
+    pub schedule_id: Option<String>,
 }
 
 /// 导出日志文件名
@@ -175,6 +181,8 @@ pub fn create_log_entry(
         status: "running".to_string(),
         error_message: None,
         log_lines: Vec::new(),
+        trigger_type: None,
+        schedule_id: None,
     }
 }
 

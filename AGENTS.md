@@ -109,6 +109,12 @@ Tauri 在 Windows target 编译时必须有 `icons/icon.ico`,否则 build.rs 报
 ### 9. 目录选择用后端 dialog,不要用前端 window.__TAURI__.dialog
 `window.__TAURI__.dialog` 是 Tauri v1 API,v2 不存在。目录选择必须在 Rust 后端用 `tauri-plugin-dialog` 的 `app.dialog().file().blocking_pick_folder()`。
 
+### 10. 升版本必须三处同步(build.rs 有断言)
+`build.rs` 会断言三处版本一致,任何一处漏改 release 构建直接 panic:
+- `Cargo.toml` 的 `version`
+- `tauri.conf.json` 的 `version`
+- `packaging/macos/Info.plist` 的 `CFBundleShortVersionString`(顺带递增 `CFBundleVersion`)
+
 ## Tauri Commands
 
 | Command | 作用 |

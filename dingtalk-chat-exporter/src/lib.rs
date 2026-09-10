@@ -948,6 +948,21 @@ fn run_schedule_now(state: State<'_, AppState>, id: String) -> Result<(), String
     Ok(())
 }
 
+/// 终止正在运行的定时任务：设置 cancel 标志 + 更新运行记录为 cancelled。
+#[tauri::command]
+fn cancel_schedule_run(state: State<'_, AppState>, id: String) -> Result<(), String> {
+    {
+        let _guard = scheduler::store_guard();
+        let store = schedule::load_store()?;
+        if store.find(&id).is_none() {
+            return Err("定时任务不存在".into());
+        }
+    }
+    scheduler::cancel_schedule_run(&state.inner, &state.cancel_requested, &id)
+        .map(|_| ())
+        .ok_or_else(|| "当前没有正在运行的该定时任务".to_string())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let app_state = AppState::default();
@@ -983,6 +998,7 @@ pub fn run() {
             delete_schedule,
             toggle_schedule,
             run_schedule_now,
+            cancel_schedule_run,
         ])
         .run(tauri::generate_context!())
         .expect("error while building tauri application");

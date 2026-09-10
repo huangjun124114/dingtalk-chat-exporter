@@ -59,6 +59,17 @@ pub fn tick(inner: &Arc<Mutex<AppInner>>, cancel_requested: &Arc<AtomicBool>) {
         }
     };
 
+    // 阶段 1.5：插入 running 记录（短锁）
+    let run_id = {
+        let _guard = store_guard();
+        let started_at = dws::current_time_str();
+        insert_running_record(&due.schedule.id, &started_at, &due.trigger_time)
+    };
+    let Some(run_id) = run_id else {
+        eprintln!("[scheduler] 插入 running 记录失败，跳过本次执行");
+        return;
+    };
+
     // 阶段 2：执行导出（长任务，不持有 store 锁）
     let now = dws::current_time_str();
     let run = execute(
@@ -67,6 +78,7 @@ pub fn tick(inner: &Arc<Mutex<AppInner>>, cancel_requested: &Arc<AtomicBool>) {
         &due.schedule,
         &due.trigger_time,
         &now,
+        &run_id,
     );
 
     // 阶段 3：回写运行记录与水位线（短锁）
@@ -97,11 +109,16 @@ pub fn run_now(
     // 手动"立即运行"：区间终点 = 当前时刻
     let trigger_time = dws::current_time_str();
     let now = trigger_time.clone();
-    let run = execute(inner, cancel_requested, &schedule, &trigger_time, &now);
+
+    // 插入 running 记录（与 tick 阶段 1.5 一致）
+    let run_id = insert_running_record(schedule_id, &now, &trigger_time)
+        .ok_or_else(|| "插入 running 记录失败".to_string())?;
+
+    let run = execute(inner, cancel_requested, &schedule, &trigger_time, &now, &run_id);
     let status = run.status.clone();
     {
         let _guard = store_guard();
-        finalize(&schedule.id, &run);
+        finalize(schedule_id, &run);
     }
     Ok(status)
 }
@@ -201,6 +218,36 @@ where
     }
 }
 
+/// 为指定任务插入一条 running 记录，返回 run_id。
+/// 同时更新 last_run_at / next_run_at（错过不补跑）。
+fn insert_running_record(schedule_id: &str, started_at: &str, trigger_time: &str) -> Option<String> {
+    let mut store = schedule::load_store().ok()?;
+    let schedule = store.find_mut(schedule_id)?;
+    let run_id = export_log::generate_timestamp_id();
+    let run = ScheduleRun {
+        run_id: run_id.clone(),
+        started_at: started_at.to_string(),
+        finished_at: None,
+        status: "running".into(),
+        range_start: schedule.resolve_start_time(),
+        range_end: Some(trigger_time.to_string()),
+        message_count: 0,
+        attachment_success: 0,
+        attachment_failed: 0,
+        error: None,
+        log_lines: Vec::new(),
+    };
+    schedule.push_run(run);
+    schedule.last_run_at = Some(started_at.to_string());
+    // 错过不补跑：从当前时间重算下次触发
+    schedule.next_run_at = schedule::compute_next_run(&schedule.schedule, started_at);
+    if let Err(error) = schedule::save_store(&store) {
+        eprintln!("[scheduler] 保存 running 记录失败: {error}");
+        return None;
+    }
+    Some(run_id)
+}
+
 /// 任务槽是否被占用（手动导出或另一次定时导出正在运行）
 fn task_slot_busy(inner: &Arc<Mutex<AppInner>>) -> bool {
     inner.lock().is_ok_and(|guard| {
@@ -222,6 +269,7 @@ fn execute(
     schedule: &Schedule,
     trigger_time: &str,
     now: &str,
+    run_id: &str,
 ) -> ScheduleRun {
     let started_at = dws::current_time_str();
 
@@ -330,7 +378,7 @@ fn execute(
     );
 
     ScheduleRun {
-        run_id: export_log::generate_timestamp_id(),
+        run_id: run_id.to_string(),
         started_at,
         finished_at: Some(finished_at),
         status,
@@ -384,7 +432,7 @@ fn should_advance_watermark(run_status: &str) -> bool {
     run_status == "success"
 }
 
-/// 回写：重新加载 store（尊重运行期间用户编辑），按 id 更新并保存
+/// 回写：重新加载 store（尊重运行期间用户编辑），按 run_id 更新并保存
 fn finalize(schedule_id: &str, run: &ScheduleRun) {
     let mut store = match schedule::load_store() {
         Ok(store) => store,
@@ -405,7 +453,11 @@ fn finalize(schedule_id: &str, run: &ScheduleRun) {
     schedule.last_run_at = Some(finished_now.clone());
     // 错过不补跑：从当前时间重算下次触发
     schedule.next_run_at = schedule::compute_next_run(&schedule.schedule, &finished_now);
-    schedule.push_run(run.clone());
+    
+    // 按 run_id 更新运行记录（而不是 push_run）
+    schedule.update_run(&run.run_id, |existing| {
+        *existing = run.clone();
+    });
 
     if let Err(error) = schedule::save_store(&store) {
         eprintln!("[scheduler] 保存运行记录失败: {error}");
@@ -419,6 +471,51 @@ fn resolve_output_root(schedule: &Schedule) -> String {
         .clone()
         .filter(|path| !path.trim().is_empty())
         .unwrap_or_else(crate::get_default_output_dir)
+}
+
+/// 终止正在运行的定时任务：设置 cancel 标志 + 更新运行记录为 cancelled。
+/// 返回被终止的 run_id（None 表示没有运行中的任务）。
+pub fn cancel_schedule_run(
+    inner: &Arc<Mutex<AppInner>>,
+    cancel_requested: &Arc<AtomicBool>,
+    schedule_id: &str,
+) -> Option<String> {
+    // 检查当前任务槽是否是该定时任务
+    {
+        let guard = inner.lock().ok()?;
+        let task = guard.task.as_ref()?;
+        if task.kind != "schedule" || task.status != "running" {
+            return None;
+        }
+    }
+    // 设置 cancel 标志
+    {
+        let mut guard = inner.lock().ok()?;
+        if let Some(task) = guard.task.as_mut() {
+            if task.kind == "schedule" && task.status == "running" {
+                cancel_requested.store(true, Ordering::Relaxed);
+                task.progress_text = "正在取消定时任务…".into();
+            }
+        }
+    }
+    // 更新运行记录为 cancelled（短锁）
+    {
+        let _guard = store_guard();
+        let mut store = schedule::load_store().ok()?;
+        let schedule = store.find_mut(schedule_id)?;
+        let cancelled_now = dws::current_time_str();
+        // 找到第一条 running 记录
+        let updated = schedule.update_run_by_status("running", |run| {
+            run.status = "error".into();
+            run.finished_at = Some(cancelled_now.clone());
+            run.error = Some("用户手动终止".into());
+        });
+        if !updated {
+            eprintln!("[scheduler] 未找到 running 记录，跳过");
+        }
+        schedule::save_store(&store).ok()?;
+    }
+    Some(String::new())
 }
 
 /// HTML 抬头用户名：优先内存中的登录信息，其次现场探测，最后回退

@@ -1228,10 +1228,16 @@ function renderSchedules() {
     var lastRun = s.lastRunAt || '尚未运行';
     var nextRun = s.enabled ? (s.nextRunAt || '计算中...') : '已停用';
     var watermark = s.lastSuccessAt || '未建立（下次为首次拉取）';
+    
+    // 检查是否有 running 状态的记录
+    var hasRunning = (s.runs || []).some(function(r) { return r.status === 'running'; });
+    var runningBadge = hasRunning ? '<span class="run-status running" style="background:#E8F8E8;color:var(--green);margin-left:8px;">运行中</span>' : '';
+    
     return '<div class="sched-card' + (s.enabled ? '' : ' disabled') + '" data-id="' + escapeHtml(s.id) + '">' +
       '<div class="sched-head">' +
         '<span class="sname">' + escapeHtml(s.name) + '</span>' +
         '<span class="sdesc">' + escapeHtml(s.description || '') + '</span>' +
+        runningBadge +
         '<span class="spacer"></span>' +
         '<label class="switch" title="启用/停用"><input type="checkbox" class="sched-toggle"' + (s.enabled ? ' checked' : '') + '><span class="slider"></span></label>' +
       '</div>' +
@@ -1243,7 +1249,7 @@ function renderSchedules() {
         '<span><b>累计运行</b>：' + (s.runCount || 0) + ' 次</span>' +
       '</div>' +
       '<div class="sched-actions">' +
-        '<button class="btn btn-blue sched-run-now">▶ 立即运行</button>' +
+        (hasRunning ? '<button class="btn btn-red sched-cancel">⏹ 终止运行</button>' : '<button class="btn btn-blue sched-run-now">▶ 立即运行</button>') +
         '<button class="btn btn-outline sched-view-runs">📋 运行记录</button>' +
         '<button class="btn btn-outline sched-edit">✏️ 编辑</button>' +
         '<button class="btn btn-red sched-delete">🗑 删除</button>' +
@@ -1254,7 +1260,13 @@ function renderSchedules() {
   list.querySelectorAll('.sched-card').forEach(function(card) {
     var id = card.dataset.id;
     card.querySelector('.sched-toggle').addEventListener('change', function() { toggleSchedule(id, this.checked); });
-    card.querySelector('.sched-run-now').addEventListener('click', function() { runScheduleNow(id); });
+    
+    var runNowBtn = card.querySelector('.sched-run-now');
+    if (runNowBtn) runNowBtn.addEventListener('click', function() { runScheduleNow(id); });
+    
+    var cancelBtn = card.querySelector('.sched-cancel');
+    if (cancelBtn) cancelBtn.addEventListener('click', function() { cancelScheduleRun(id); });
+    
     card.querySelector('.sched-view-runs').addEventListener('click', function() { showScheduleRuns(id); });
     card.querySelector('.sched-edit').addEventListener('click', function() { openScheduleModal(id); });
     card.querySelector('.sched-delete').addEventListener('click', function() { deleteSchedule(id); });
@@ -1288,10 +1300,21 @@ async function runScheduleNow(id) {
   try {
     await invoke('run_schedule_now', { id: id });
     alert('已开始运行，可在「运行记录」中查看结果。\n（与手动导出共用任务槽，进度可在导出页观察）');
-    // 运行是异步的，稍后刷新列表
-    setTimeout(loadSchedules, 1500);
+    // 运行是异步的，立即刷新列表以显示 running 状态
+    loadSchedules();
   } catch(e) {
     alert('启动失败: ' + e);
+  }
+}
+
+async function cancelScheduleRun(id) {
+  if (!confirm('确定要终止该任务的运行吗？\n\n已导出的数据会保留，但本次运行记录会标记为「已终止」。')) return;
+  try {
+    await invoke('cancel_schedule_run', { id: id });
+    alert('已发送终止信号，任务将在当前操作完成后停止。');
+    loadSchedules();
+  } catch(e) {
+    alert('终止失败: ' + e);
   }
 }
 

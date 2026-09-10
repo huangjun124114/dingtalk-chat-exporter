@@ -306,6 +306,26 @@ impl Schedule {
         self.runs.truncate(MAX_RUNS_PER_SCHEDULE);
         self.run_count = self.run_count.saturating_add(1);
     }
+
+    /// 按 run_id 原地更新运行记录（用于 running → 终态）
+    pub fn update_run(&mut self, run_id: &str, updater: impl FnOnce(&mut ScheduleRun)) -> bool {
+        if let Some(run) = self.runs.iter_mut().find(|r| r.run_id == run_id) {
+            updater(run);
+            true
+        } else {
+            false
+        }
+    }
+
+    /// 按状态查找并更新运行记录（用于终止 running 记录）
+    pub fn update_run_by_status(&mut self, status: &str, updater: impl FnOnce(&mut ScheduleRun)) -> bool {
+        if let Some(run) = self.runs.iter_mut().find(|r| r.status == status) {
+            updater(run);
+            true
+        } else {
+            false
+        }
+    }
 }
 
 /// 调度任务集合（持久化容器）

@@ -963,6 +963,66 @@ fn cancel_schedule_run(state: State<'_, AppState>, id: String) -> Result<(), Str
         .ok_or_else(|| "当前没有正在运行的该定时任务".to_string())
 }
 
+/// 调度运行态快照：定时页据此轮询刷新按钮与指示灯。
+/// 全局任务槽是单任务互斥的，因此「有任务在运行」是全局状态（含手动导出与定时任务）。
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SchedulerStatus {
+    /// 全局是否有任务在运行
+    running: bool,
+    /// 运行中的任务类别：export（手动导出）| schedule（定时任务）
+    running_kind: Option<String>,
+    /// 正在运行的定时任务 id（仅 runningKind=schedule 时非空）
+    running_schedule_id: Option<String>,
+    /// 是否已请求终止（界面按钮显示「停止中…」）
+    stopping: bool,
+}
+
+#[tauri::command]
+fn get_scheduler_status(state: State<'_, AppState>) -> Result<SchedulerStatus, String> {
+    // 先取任务槽快照并释放 inner 锁，再取 store 锁，避免 store→inner 锁嵌套
+    let (running, running_kind) = {
+        let inner = state.inner.lock().map_err(lock_error)?;
+        match inner.task.as_ref() {
+            Some(task) if task.status == "running" => (true, Some(task.kind.clone())),
+            _ => (false, None),
+        }
+    };
+    if !running {
+        return Ok(SchedulerStatus {
+            running: false,
+            running_kind: None,
+            running_schedule_id: None,
+            stopping: false,
+        });
+    }
+    let stopping = state.cancel_requested.load(Ordering::Relaxed);
+    // 正在运行的定时任务 id：schedules.json 中最新一条记录状态为 running 的任务
+    let running_schedule_id = if running_kind.as_deref() == Some("schedule") {
+        let _guard = scheduler::store_guard();
+        schedule::load_store().ok().and_then(|store| {
+            store
+                .schedules
+                .iter()
+                .find(|candidate| {
+                    candidate
+                        .runs
+                        .first()
+                        .is_some_and(|run| run.status == "running")
+                })
+                .map(|candidate| candidate.id.clone())
+        })
+    } else {
+        None
+    };
+    Ok(SchedulerStatus {
+        running: true,
+        running_kind,
+        running_schedule_id,
+        stopping,
+    })
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let app_state = AppState::default();
@@ -999,6 +1059,7 @@ pub fn run() {
             toggle_schedule,
             run_schedule_now,
             cancel_schedule_run,
+            get_scheduler_status,
         ])
         .run(tauri::generate_context!())
         .expect("error while building tauri application");

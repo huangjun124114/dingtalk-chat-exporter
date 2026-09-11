@@ -1,6 +1,6 @@
 [package]
 name = "dingtalk-chat-exporter"
-version = "1.1.1"
+version = "1.1.2"
 description = "钉钉群聊记录导出器 - 选择群、自动导出消息和附件、生成聊天页面"
 authors = ["ainuoyan"]
 license = "MIT"

@@ -126,6 +126,13 @@ body{font-family:"PingFang SC","Microsoft YaHei",-apple-system,BlinkMacSystemFon
 .sched-chip{font-size:12px;background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:3px 10px;color:var(--text);}
 .sched-actions{display:flex;gap:8px;flex-wrap:wrap;}
 .sched-actions .btn{padding:7px 14px;font-size:13px;}
+/* 运行状态灯（位于「时间间隔」与「开关」之间） */
+.run-light{width:10px;height:10px;border-radius:50%;flex-shrink:0;display:inline-block;background:#C9CDD4;}
+.run-light.idle{background:var(--green);}
+.run-light.busy{background:var(--red);animation:light-pulse 1.2s ease-in-out infinite;}
+.run-light.failed{background:#1F2329;}
+.run-light-label{font-size:12px;color:var(--sub);flex-shrink:0;white-space:nowrap;}
+@keyframes light-pulse{0%,100%{opacity:1;}50%{opacity:.3;}}
 /* 开关 */
 .switch{position:relative;display:inline-block;width:42px;height:24px;flex-shrink:0;}
 .switch input{opacity:0;width:0;height:0;}
@@ -155,6 +162,8 @@ body{font-family:"PingFang SC","Microsoft YaHei",-apple-system,BlinkMacSystemFon
 .run-status.partial{background:#FFF7E6;color:var(--orange);}
 .run-status.error{background:#FFF2F0;color:var(--red);}
 .run-status.skipped{background:var(--bg);color:var(--sub);}
+.run-status.running{background:#E8F1FF;color:var(--blue);}
+.run-status.cancelled{background:var(--bg);color:var(--sub);}
 .modal-mask{display:none;position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:100;align-items:flex-start;justify-content:center;padding:40px 20px;overflow-y:auto;}
 .modal-mask.show{display:flex;}
 .modal{background:var(--card);border-radius:12px;width:100%;max-width:720px;padding:20px 22px;}
@@ -505,10 +514,10 @@ body{font-family:"PingFang SC","Microsoft YaHei",-apple-system,BlinkMacSystemFon
     <div class="log-table-wrapper">
       <table class="log-table">
         <thead>
-          <tr><th>触发时间</th><th>状态</th><th>拉取区间</th><th>消息数</th><th>附件</th></tr>
+          <tr><th>开始时间</th><th>结束时间</th><th>状态</th><th>拉取区间</th><th>消息数</th><th>附件</th></tr>
         </thead>
         <tbody id="runsTableBody">
-          <tr><td colspan="5" class="empty">加载中...</td></tr>
+          <tr><td colspan="6" class="empty">加载中...</td></tr>
         </tbody>
       </table>
     </div>
@@ -548,7 +557,8 @@ function switchView(view) {
   document.getElementById('logsView').style.display = view === 'logs' ? '' : 'none';
   document.getElementById('settingsView').style.display = view === 'settings' ? '' : 'none';
   document.getElementById('aboutView').style.display = view === 'about' ? '' : 'none';
-  if (view === 'schedules') loadSchedules();
+  // 定时页需要随全局运行态刷新按钮/指示灯，进入时轮询、离开时停止
+  if (view === 'schedules') { loadSchedules(); startSchedulerPolling(); } else { stopSchedulerPolling(); }
   if (view === 'logs') loadExportLogs();
   if (view === 'settings') loadSettings();
   if (view === 'about') updateAboutPage();
@@ -1228,16 +1238,13 @@ function renderSchedules() {
     var lastRun = s.lastRunAt || '尚未运行';
     var nextRun = s.enabled ? (s.nextRunAt || '计算中...') : '已停用';
     var watermark = s.lastSuccessAt || '未建立（下次为首次拉取）';
-    
-    // 检查是否有 running 状态的记录
-    var hasRunning = (s.runs || []).some(function(r) { return r.status === 'running'; });
-    var runningBadge = hasRunning ? '<span class="run-status running" style="background:#E8F8E8;color:var(--green);margin-left:8px;">运行中</span>' : '';
-    
+
     return '<div class="sched-card' + (s.enabled ? '' : ' disabled') + '" data-id="' + escapeHtml(s.id) + '">' +
       '<div class="sched-head">' +
         '<span class="sname">' + escapeHtml(s.name) + '</span>' +
         '<span class="sdesc">' + escapeHtml(s.description || '') + '</span>' +
-        runningBadge +
+        '<span class="run-light" title="状态检查中"></span>' +
+        '<span class="run-light-label"></span>' +
         '<span class="spacer"></span>' +
         '<label class="switch" title="启用/停用"><input type="checkbox" class="sched-toggle"' + (s.enabled ? ' checked' : '') + '><span class="slider"></span></label>' +
       '</div>' +
@@ -1249,7 +1256,7 @@ function renderSchedules() {
         '<span><b>累计运行</b>：' + (s.runCount || 0) + ' 次</span>' +
       '</div>' +
       '<div class="sched-actions">' +
-        (hasRunning ? '<button class="btn btn-red sched-cancel">⏹ 终止运行</button>' : '<button class="btn btn-blue sched-run-now">▶ 立即运行</button>') +
+        '<button class="btn btn-blue sched-run-toggle" data-mode="run">▶ 立即运行</button>' +
         '<button class="btn btn-outline sched-view-runs">📋 运行记录</button>' +
         '<button class="btn btn-outline sched-edit">✏️ 编辑</button>' +
         '<button class="btn btn-red sched-delete">🗑 删除</button>' +
@@ -1260,17 +1267,12 @@ function renderSchedules() {
   list.querySelectorAll('.sched-card').forEach(function(card) {
     var id = card.dataset.id;
     card.querySelector('.sched-toggle').addEventListener('change', function() { toggleSchedule(id, this.checked); });
-    
-    var runNowBtn = card.querySelector('.sched-run-now');
-    if (runNowBtn) runNowBtn.addEventListener('click', function() { runScheduleNow(id); });
-    
-    var cancelBtn = card.querySelector('.sched-cancel');
-    if (cancelBtn) cancelBtn.addEventListener('click', function() { cancelScheduleRun(id); });
-    
+    card.querySelector('.sched-run-toggle').addEventListener('click', function() { onRunToggle(id, this.dataset.mode); });
     card.querySelector('.sched-view-runs').addEventListener('click', function() { showScheduleRuns(id); });
     card.querySelector('.sched-edit').addEventListener('click', function() { openScheduleModal(id); });
     card.querySelector('.sched-delete').addEventListener('click', function() { deleteSchedule(id); });
   });
+  applySchedulerStatus();
 }
 
 async function toggleSchedule(id, enabled) {
@@ -1295,26 +1297,145 @@ async function deleteSchedule(id) {
   }
 }
 
-async function runScheduleNow(id) {
-  if (!confirm('立即运行一次该任务？\n\n将从水位线增量拉取到当前时刻；若正在导出其他任务会被拒绝。')) return;
-  try {
-    await invoke('run_schedule_now', { id: id });
-    alert('已开始运行，可在「运行记录」中查看结果。\n（与手动导出共用任务槽，进度可在导出页观察）');
-    // 运行是异步的，立即刷新列表以显示 running 状态
-    loadSchedules();
-  } catch(e) {
-    alert('启动失败: ' + e);
+// ---- 运行态：按钮随全局任务槽切换「立即运行 / 停止运行」 ----
+// 全局单任务互斥：只要有任何任务在运行（本任务 / 其它定时任务 / 手动导出），
+// 「立即运行」都必然被拒绝，因此该卡片按钮统一切换为「停止运行」。
+let schedulerStatus = { running: false, runningKind: null, runningScheduleId: null, stopping: false };
+let schedulerPollTimer = null;
+let schedulerPollBusy = false;
+
+// immediate=false 用于「刚点了立即运行」：后端在独立线程里占用任务槽，
+// 立刻回查可能抢在占槽之前拿到 running=false，导致按钮闪回「立即运行」。
+function startSchedulerPolling(immediate) {
+  stopSchedulerPolling();
+  schedulerPollTimer = setInterval(refreshSchedulerStatus, 2000);
+  if (immediate !== false) refreshSchedulerStatus();
+}
+
+function stopSchedulerPolling() {
+  if (schedulerPollTimer) {
+    clearInterval(schedulerPollTimer);
+    schedulerPollTimer = null;
   }
 }
 
-async function cancelScheduleRun(id) {
-  if (!confirm('确定要终止该任务的运行吗？\n\n已导出的数据会保留，但本次运行记录会标记为「已终止」。')) return;
+// 轮询运行态：状态翻转时顺带刷新卡片数据（运行记录 / 水位线 / 下次运行时间）
+async function refreshSchedulerStatus() {
+  if (!invoke || schedulerPollBusy) return;
+  schedulerPollBusy = true;
   try {
-    await invoke('cancel_schedule_run', { id: id });
-    alert('已发送终止信号，任务将在当前操作完成后停止。');
+    var previous = schedulerStatus;
+    var next = await invoke('get_scheduler_status');
+    schedulerStatus = next;
+    var justFinished = previous.running && !next.running;
+    if (justFinished) {
+      await loadSchedules();
+    } else {
+      applySchedulerStatus();
+    }
+  } catch(e) {
+    // 轮询失败静默处理，避免打断界面操作
+  } finally {
+    schedulerPollBusy = false;
+  }
+}
+
+// 按全局运行态刷新每张卡片的按钮与指示灯
+function applySchedulerStatus() {
+  var status = schedulerStatus || {};
+  var buttonState;
+  if (status.running) {
+    buttonState = status.stopping
+      ? { mode: 'stopping', cls: 'btn btn-red', text: '⏹ 停止中…', disabled: true }
+      : { mode: 'stop', cls: 'btn btn-red', text: '⏹ 停止运行', disabled: false };
+  } else {
+    buttonState = { mode: 'run', cls: 'btn btn-blue', text: '▶ 立即运行', disabled: false };
+  }
+  document.querySelectorAll('#scheduleList .sched-card').forEach(function(card) {
+    var id = card.dataset.id;
+    var lightState = resolveLightState(id);
+    var light = card.querySelector('.run-light');
+    if (light) {
+      light.className = 'run-light ' + lightState.cls;
+      light.title = lightState.text;
+    }
+    var label = card.querySelector('.run-light-label');
+    if (label) label.textContent = lightState.text;
+    var button = card.querySelector('.sched-run-toggle');
+    if (button) {
+      button.className = 'btn sched-run-toggle ' + buttonState.cls;
+      button.textContent = buttonState.text;
+      button.dataset.mode = buttonState.mode;
+      button.disabled = buttonState.disabled;
+    }
+  });
+}
+
+// 指示灯：红灯=有任务在运行；黑灯=上次运行失败；绿灯=空闲
+function resolveLightState(id) {
+  var status = schedulerStatus || {};
+  if (status.running) {
+    if (status.runningScheduleId && status.runningScheduleId === id) {
+      return { cls: 'busy', text: '本任务运行中' };
+    }
+    if (status.runningKind === 'export') {
+      return { cls: 'busy', text: '手动导出中' };
+    }
+    return { cls: 'busy', text: '其他任务运行中' };
+  }
+  var schedule = allSchedules.find(function(x) { return x.id === id; });
+  var last = schedule && (schedule.runs || [])[0];
+  if (last && (last.status === 'error' || last.status === 'partial')) {
+    return { cls: 'failed', text: '上次运行失败' };
+  }
+  return { cls: 'idle', text: '空闲' };
+}
+
+function onRunToggle(id, mode) {
+  if (mode === 'stop') {
+    stopRunningTask(id);
+  } else if (mode === 'run') {
+    runScheduleNow(id);
+  }
+  // mode=stopping：已发出终止请求，等待任务结束，忽略点击
+}
+
+async function runScheduleNow(id) {
+  if (!confirm('立即运行一次该任务？\n\n将从水位线增量拉取到当前时刻。')) return;
+  try {
+    await invoke('run_schedule_now', { id: id });
+    // 运行是异步的：立即进入「停止运行」态，并马上拉一次真实运行态
+    schedulerStatus = { running: true, runningKind: 'schedule', runningScheduleId: id, stopping: false };
+    applySchedulerStatus();
     loadSchedules();
+    // 延迟一次轮询（2s 后），避免后端占槽前的空窗把按钮闪回「立即运行」
+    startSchedulerPolling(false);
+  } catch(e) {
+    alert('启动失败: ' + e);
+    refreshSchedulerStatus();
+  }
+}
+
+// 停止当前正在运行的任务（可能是本卡片的定时任务、其它定时任务，或导出页的手动导出）
+async function stopRunningTask(cardId) {
+  var status = schedulerStatus || {};
+  if (!status.running) {
+    refreshSchedulerStatus();
+    return;
+  }
+  if (!confirm('确定终止当前正在运行的任务吗？\n\n已导出的数据会保留，本次运行记录会标记为「已终止」。')) return;
+  try {
+    if (status.runningKind === 'export') {
+      await invoke('cancel_export');
+    } else {
+      await invoke('cancel_schedule_run', { id: status.runningScheduleId || cardId });
+    }
+    schedulerStatus.stopping = true;
+    applySchedulerStatus();
+    startSchedulerPolling();
   } catch(e) {
     alert('终止失败: ' + e);
+    refreshSchedulerStatus();
   }
 }
 
@@ -1327,18 +1448,20 @@ async function showScheduleRuns(id) {
   document.getElementById('runsModal').classList.add('show');
   document.getElementById('runDetailArea').style.display = 'none';
   var tbody = document.getElementById('runsTableBody');
-  tbody.innerHTML = '<tr><td colspan="5" class="empty">加载中...</td></tr>';
+  tbody.innerHTML = '<tr><td colspan="6" class="empty">加载中...</td></tr>';
   try {
     var runs = await invoke('get_schedule_runs', { id: id });
     if (!runs || runs.length === 0) {
-      tbody.innerHTML = '<tr><td colspan="5" class="empty">尚无运行记录</td></tr>';
+      tbody.innerHTML = '<tr><td colspan="6" class="empty">尚无运行记录</td></tr>';
       return;
     }
-    var statusMap = {success:'成功',partial:'部分成功',error:'失败',skipped:'跳过'};
+    var statusMap = {success:'成功',partial:'部分成功',error:'失败',running:'运行中',cancelled:'已终止',skipped:'跳过'};
     tbody.innerHTML = runs.map(function(r, i) {
       var range = (r.rangeStart || '最早') + ' ~ ' + (r.rangeEnd || '触发时刻');
+      var finished = r.finishedAt || (r.status === 'running' ? '进行中…' : '—');
       return '<tr data-run-idx="' + i + '" style="cursor:pointer;">' +
         '<td>' + escapeHtml(r.startedAt) + '</td>' +
+        '<td>' + escapeHtml(finished) + '</td>' +
         '<td><span class="run-status ' + r.status + '">' + (statusMap[r.status] || r.status) + '</span></td>' +
         '<td style="font-size:12px;">' + escapeHtml(range) + '</td>' +
         '<td>' + (r.messageCount || 0).toLocaleString() + '</td>' +

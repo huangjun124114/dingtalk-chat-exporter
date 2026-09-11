@@ -223,7 +223,7 @@ pub struct ScheduleRun {
     pub started_at: String,
     #[serde(default)]
     pub finished_at: Option<String>,
-    /// success | partial | error | skipped
+    /// running（执行中）| success | partial | error | cancelled | skipped
     pub status: String,
     /// 本次拉取区间起点
     #[serde(default)]

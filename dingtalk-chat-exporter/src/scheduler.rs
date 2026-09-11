@@ -375,6 +375,10 @@ fn execute(
             "error",
             format!("【定时】任务「{}」部分完成，有错误", schedule.name),
         ),
+        "cancelled" => (
+            "cancelled",
+            format!("【定时】任务「{}」已终止", schedule.name),
+        ),
         _ => (
             "error",
             format!("【定时】任务「{}」导出失败", schedule.name),
@@ -419,11 +423,11 @@ fn skipped_run(now: &str, trigger_time: &str, reason: String) -> ScheduleRun {
     }
 }
 
-/// outcome → 运行状态：done=success；有群已产出=partial；其余=error
+/// outcome → 运行状态：done=success；cancelled=用户终止；有群已产出=partial；其余=error
 fn map_outcome_status(outcome: &exporter::JobOutcome) -> String {
     match outcome.status.as_str() {
         "done" => "success".into(),
-        "cancelled" => "error".into(),
+        "cancelled" => "cancelled".into(),
         _ => {
             let any_published = outcome
                 .groups
@@ -485,13 +489,13 @@ fn resolve_output_root(schedule: &Schedule) -> String {
 }
 
 /// 终止正在运行的定时任务：设置 cancel 标志 + 更新运行记录为 cancelled。
-/// 返回被终止的 run_id（None 表示没有运行中的任务）。
+/// 返回本次终止的 run_id（None 表示当前没有运行中的定时任务）。
 pub fn cancel_schedule_run(
     inner: &Arc<Mutex<AppInner>>,
     cancel_requested: &Arc<AtomicBool>,
     schedule_id: &str,
 ) -> Option<String> {
-    // 检查当前任务槽是否是该定时任务
+    // 前置检查：任务槽必须是运行中的定时任务（手动导出请走 cancel_export）
     {
         let guard = inner.lock().ok()?;
         let task = guard.task.as_ref()?;
@@ -499,7 +503,7 @@ pub fn cancel_schedule_run(
             return None;
         }
     }
-    // 设置 cancel 标志
+    // 置终止标志：导出循环在下一个检查点退出
     {
         let mut guard = inner.lock().ok()?;
         if let Some(task) = guard.task.as_mut() {
@@ -509,24 +513,39 @@ pub fn cancel_schedule_run(
             }
         }
     }
-    // 更新运行记录为 cancelled（短锁）
-    {
+    // 运行记录置 cancelled（短锁）。
+    // 优先按传入 id 定位；其它任务在跑时界面传入的是卡片 id，与实际运行任务可能不一致，
+    // 因此找不到 running 记录时回退扫描全部任务，保证记录状态与运行态一致。
+    let cancelled_run_id = {
         let _guard = store_guard();
         let mut store = schedule::load_store().ok()?;
-        let schedule = store.find_mut(schedule_id)?;
         let cancelled_now = dws::current_time_str();
-        // 找到第一条 running 记录
-        let updated = schedule.update_run_by_status("running", |run| {
-            run.status = "error".into();
-            run.finished_at = Some(cancelled_now.clone());
-            run.error = Some("用户手动终止".into());
-        });
-        if !updated {
+        let mark = |schedule: &mut Schedule| -> Option<String> {
+            let mut hit = None;
+            schedule.update_run_by_status("running", |run| {
+                run.status = "cancelled".into();
+                run.finished_at = Some(cancelled_now.clone());
+                run.error = Some("用户手动终止".into());
+                hit = Some(run.run_id.clone());
+            });
+            hit
+        };
+        let mut found = store.find_mut(schedule_id).and_then(mark);
+        if found.is_none() {
+            for schedule in store.schedules.iter_mut() {
+                found = mark(schedule);
+                if found.is_some() {
+                    break;
+                }
+            }
+        }
+        if found.is_none() {
             eprintln!("[scheduler] 未找到 running 记录，跳过");
         }
         schedule::save_store(&store).ok()?;
-    }
-    Some(String::new())
+        found
+    };
+    Some(cancelled_run_id.unwrap_or_default())
 }
 
 /// HTML 抬头用户名：优先内存中的登录信息，其次现场探测，最后回退
@@ -696,7 +715,7 @@ mod tests {
             groups: Vec::new(),
             all_errors: Vec::new(),
         };
-        assert_eq!(map_outcome_status(&cancelled), "error");
+        assert_eq!(map_outcome_status(&cancelled), "cancelled");
 
         let partial = JobOutcome {
             status: "error".into(),
@@ -723,6 +742,8 @@ mod tests {
         assert!(!should_advance_watermark("partial"));
         assert!(!should_advance_watermark("error"));
         assert!(!should_advance_watermark("skipped"));
+        assert!(!should_advance_watermark("running"));
+        assert!(!should_advance_watermark("cancelled"));
     }
 
     #[test]

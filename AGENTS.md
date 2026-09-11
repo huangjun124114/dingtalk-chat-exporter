@@ -125,6 +125,15 @@ Tauri 在 Windows target 编译时必须有 `icons/icon.ico`,否则 build.rs 报
 ### 12. 改同一文件的多处编辑要一次一改
 在同一轮里对同一文件并发提交多个编辑,后写入的会覆盖先写入的(表现为"提示成功但内容没变")。改同一文件多处时,逐次编辑并在每步后 `grep` 校验落盘结果。
 
+### 13. 界面"运行/停止"必须看全局任务槽,不能只看本任务
+`AppInner.task` 是全局单任务槽,手动导出与定时任务共用。因此:
+- 界面判断"能否立即运行"必须用 `get_scheduler_status` 的全局 `running`,**不能**只看某个任务的 `runs[0].status`(漏掉"手动导出正在跑"与"其它定时任务正在跑"两种情况,按钮会停留在"立即运行"却在点击后被拒)。
+- 终止入口要按 `runningKind` 分流:手动导出 → `cancel_export`,定时任务 → `cancel_schedule_run`(传 `runningScheduleId`,其它任务在跑时点的是别的卡片)。
+- 状态灯的红/绿/黑也只能由「全局 running」+「本任务最近一次运行状态」共同决定。
+
+### 14. 运行记录终态用 cancelled,不要复用 error
+用户手动终止的运行记录状态是 `cancelled`(界面「已终止」),`scheduler::cancel_schedule_run` 与 `map_outcome_status` 都要映射到它。若写成 `error`,界面会把"主动终止"误报为"失败",状态灯也会错误地点亮黑灯。`should_advance_watermark` 对 `cancelled` 返回 false(不推进水位线)。
+
 ## Tauri Commands
 
 | Command | 作用 |
@@ -150,6 +159,8 @@ Tauri 在 Windows target 编译时必须有 `icons/icon.ico`,否则 build.rs 报
 | `delete_schedule` | 删除任务(连同运行历史) |
 | `toggle_schedule` | 启用/停用任务(启用时重算下次触发) |
 | `run_schedule_now` | 立即运行一次(与手动导出共享任务槽,忙则拒绝) |
+| `cancel_schedule_run` | 终止正在运行的定时任务(按运行记录定位,置 `cancelled`) |
+| `get_scheduler_status` | 定时页轮询运行态:`running` / `runningKind` / `runningScheduleId` / `stopping` |
 
 ## 定时导出核心设计(v1.1.0)
 

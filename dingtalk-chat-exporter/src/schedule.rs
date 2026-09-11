@@ -318,7 +318,11 @@ impl Schedule {
     }
 
     /// 按状态查找并更新运行记录（用于终止 running 记录）
-    pub fn update_run_by_status(&mut self, status: &str, updater: impl FnOnce(&mut ScheduleRun)) -> bool {
+    pub fn update_run_by_status(
+        &mut self,
+        status: &str,
+        updater: impl FnOnce(&mut ScheduleRun),
+    ) -> bool {
         if let Some(run) = self.runs.iter_mut().find(|r| r.status == status) {
             updater(run);
             true

@@ -7,6 +7,21 @@
 
 ---
 
+## [1.1.1] - 2026-09-11
+
+### 变更（不兼容：定时导出的磁盘布局）
+
+- **定时导出按月分文件**：`messages/{YYYYMM}.json`、`attachments_index/{YYYYMM}.json` 与月度 HTML 同粒度，解决"消息/附件 JSON 随时间无限膨胀"的问题。
+- **移除根 `attachments_index.json`**：其内容已由月度索引完整覆盖；`viewer::generate_html` 改为显式接收索引路径。
+- **增量重建**：内容未变化的月度 JSON 不再重写（不刷新 mtime），HTML 只重建「有变化 / 缺失 / 数据比 HTML 新」的月份，不再每次全量重写历史 HTML。
+- **旧布局自动迁移**：`messages/{批次时间戳}/` 批次目录与根索引在下一次运行时自动合并进月度文件，写入成功后删除旧数据；幂等，可安全重复执行。
+- **修复**：`lib.rs` 中 `log_offset_tracks_evicted_lines` 被重复堆叠 5 个 `#[test]` 属性，导致该用例被重复执行 5 次。
+
+### 验证
+
+- `cargo test --lib` 106 passed / 0 failed；`cargo clippy --lib --tests` 零警告；`cargo fmt` 通过。
+- 真实数据迁移演习：607 条消息、219 条附件记录迁移前后完全一致，旧批次目录与根索引清理干净。
+
 ## [1.1.0] - 2026-09-09
 
 ### 新增

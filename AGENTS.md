@@ -27,7 +27,7 @@ dingtalk-chat-exporter/      源码项目
     ├── date.rs              dws 时间格式校验与日期换算
     ├── media.rs             消息附件标记解析与文件名提取
     ├── viewer.rs            流式生成聊天 HTML(附件 base64 内嵌)
-    ├── exporter.rs          导出核心(手动/定时共用):ExportJob + run_job + ArchiveStrategy
+    ├── exporter.rs          导出核心(手动/定时共用):ExportJob + run_job + ArchiveStrategy + 月度分文件落盘
     ├── cron.rs              自研最小 cron 引擎(5 字段,*/N/范围/列表/星期名,北京时间)
     ├── schedule.rs          调度模型与持久化(Schedule/ScheduleConfig/ScheduleRun/ScheduleStore)
     └── scheduler.rs         后台调度引擎(30s tick 三阶段 + 水位线增量 + skipped 互斥)
@@ -115,6 +115,16 @@ Tauri 在 Windows target 编译时必须有 `icons/icon.ico`,否则 build.rs 报
 - `tauri.conf.json` 的 `version`
 - `packaging/macos/Info.plist` 的 `CFBundleShortVersionString`(顺带递增 `CFBundleVersion`)
 
+### 11. viewer 的附件索引路径必须显式传入
+`viewer::generate_html` 不再从 `attachments_dir.parent()` 反推索引路径,索引文件由调用方显式传入:
+- 手动导出 → `{群目录}/attachments_index.json`
+- 定时导出 → `{群目录}/attachments_index/{YYYYMM}.json`
+
+新增调用点时必须传对路径,否则 HTML 里的附件会全部丢失(不会报错,只是显示"附件未下载")。
+
+### 12. 改同一文件的多处编辑要一次一改
+在同一轮里对同一文件并发提交多个编辑,后写入的会覆盖先写入的(表现为"提示成功但内容没变")。改同一文件多处时,逐次编辑并在每步后 `grep` 校验落盘结果。
+
 ## Tauri Commands
 
 | Command | 作用 |
@@ -149,7 +159,10 @@ Tauri 在 Windows target 编译时必须有 `icons/icon.ico`,否则 build.rs 报
 - **全局单任务互斥**:手动与定时共享 `AppInner.task` 槽;定时到期遇忙 → 运行记录 `skipped`。
 - **三阶段 tick(30s)**:短锁扫描(补算 nextRunAt/找到期/记 skipped) → 长导出(不持 store 锁) → 短锁回写(水位线/运行记录/重算下次)。
 - **锁顺序纪律**:busy 快照必须在拿 store 锁之前取(避免 store→inner 与命令的 inner→store 嵌套死锁);`execute` 内双重检查兜底。
-- **归档策略**:`ScheduledGroupArchive` 固定 `输出目录/群名/` 归档,按月合并 HTML(消息 ID 去重),附件已存在即复用;手动导出仍走 `PerRunArchive` 每次独立目录。
+- **归档策略**:`ScheduledGroupArchive` 固定 `输出目录/群名_群ID哈希/` 归档;手动导出仍走 `PerRunArchive` 每次独立目录。
+- **月度分文件**:定时导出的 `messages/{YYYYMM}.json`、`attachments_index/{YYYYMM}.json` 与 `群名-{YYYYMM}.html` 同粒度,按月合并去重,避免单文件随时间无限膨胀。
+- **只重建变化月份**:`write_json_if_changed` 内容一致时跳过写入(不刷新 mtime);`html_months` 仅纳入「变化 / HTML 缺失 / 数据比 HTML 新」的月份。
+- **旧布局自动迁移**:`migrate_legacy` 把 `messages/{批次}/` 与根 `attachments_index.json` 合并进月度文件,写入成功后删除旧数据;幂等可重复执行。
 - **同群冲突**:同一群只允许被一个定时任务引用;前端勾选时预警,后端 `save_schedule` 硬拒绝。
 
 ## 参考项目

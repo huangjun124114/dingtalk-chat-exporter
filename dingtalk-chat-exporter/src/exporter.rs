@@ -14,7 +14,7 @@ use crate::export_log::{self, HtmlFileInfo};
 use crate::media;
 use crate::viewer;
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -102,34 +102,52 @@ pub struct JobOutcome {
     pub all_errors: Vec<String>,
 }
 
+/// 一次 HTML 生成计划：一个月对应一个
+pub struct HtmlMonth {
+    pub year_month: String,
+    pub messages: Vec<Message>,
+    /// 该月消息对应的附件索引文件
+    pub index_path: PathBuf,
+}
+
 /// 存档策略：手动与定时唯一的差异分派点
 pub trait ArchiveStrategy: Send + Sync {
     /// 群目录路径
     fn group_dir(&self, root: &Path, group: &GroupExportRequest, batch_stamp: &str) -> PathBuf;
 
-    /// 本次消息 JSON 的落盘路径
-    fn messages_path(&self, group_dir: &Path) -> PathBuf;
-
-    /// 本次附件索引的落盘路径
-    fn index_path(&self, group_dir: &Path) -> PathBuf;
-
     /// 下载附件前：已存在且非空的附件可跳过（增量复用）
     fn reuse_existing_attachment(&self) -> bool;
 
-    /// 生成 HTML 前：返回用于渲染的消息集合。
-    /// PerRun = 本次消息；ScheduledGroup = 合并全部历史批次并按消息 ID 去重。
-    fn messages_for_html(
+    /// 落盘本次消息，返回内容发生变化的月份（YYYYMM）集合
+    fn persist_messages(
         &self,
         group_dir: &Path,
-        current: &[Message],
-    ) -> Result<Vec<Message>, String>;
+        messages: &[Message],
+        batch_stamp: &str,
+    ) -> Result<Vec<String>, String>;
 
-    /// HTML 生成前：确保群目录根的 attachments_index.json 为合并索引（viewer 依赖）。
-    /// PerRun 模式本次索引就在根上，无需处理；ScheduledGroup 需合并历史批次索引。
-    fn prepare_root_index(&self, group_dir: &Path) -> Result<(), String>;
+    /// 落盘本次附件索引，返回内容发生变化的月份集合
+    fn persist_index(
+        &self,
+        group_dir: &Path,
+        records: &[serde_json::Value],
+    ) -> Result<Vec<String>, String>;
+
+    /// 计算需要（重新）生成 HTML 的月份及其数据来源
+    fn html_months(
+        &self,
+        group_dir: &Path,
+        group_title: &str,
+        changed_months: &[String],
+    ) -> Result<Vec<HtmlMonth>, String>;
 
     /// HTML 文件名（PerRun 处理重名加序号；ScheduledGroup 固定名覆盖重建）
     fn html_filename(&self, group_title: &str, year_month: &str, group_dir: &Path) -> String;
+
+    /// 兼容旧目录布局：把历史数据迁移到当前布局（幂等，默认无需处理）
+    fn migrate_legacy(&self, _group_dir: &Path) -> Result<(), String> {
+        Ok(())
+    }
 }
 
 /// 现状手动导出存档：每次运行新建独立目录
@@ -148,28 +166,48 @@ impl ArchiveStrategy for PerRunArchive {
         root.join(name)
     }
 
-    fn messages_path(&self, group_dir: &Path) -> PathBuf {
-        group_dir.join("messages.json")
-    }
-
-    fn index_path(&self, group_dir: &Path) -> PathBuf {
-        group_dir.join("attachments_index.json")
-    }
-
     fn reuse_existing_attachment(&self) -> bool {
         false
     }
 
-    fn messages_for_html(
+    /// 每次运行独立目录：消息与索引各写单文件（与抽离前行为一致）
+    fn persist_messages(
         &self,
-        _group_dir: &Path,
-        current: &[Message],
-    ) -> Result<Vec<Message>, String> {
-        Ok(current.to_vec())
+        group_dir: &Path,
+        messages: &[Message],
+        _batch_stamp: &str,
+    ) -> Result<Vec<String>, String> {
+        write_json(&group_dir.join("messages.json"), &messages)?;
+        Ok(Vec::new())
     }
 
-    fn prepare_root_index(&self, _group_dir: &Path) -> Result<(), String> {
-        Ok(())
+    fn persist_index(
+        &self,
+        group_dir: &Path,
+        records: &[serde_json::Value],
+    ) -> Result<Vec<String>, String> {
+        write_json(&group_dir.join("attachments_index.json"), records)?;
+        Ok(Vec::new())
+    }
+
+    fn html_months(
+        &self,
+        group_dir: &Path,
+        _group_title: &str,
+        _changed_months: &[String],
+    ) -> Result<Vec<HtmlMonth>, String> {
+        let messages = read_messages(&group_dir.join("messages.json"))?;
+        let index_path = group_dir.join("attachments_index.json");
+        Ok(
+            group_by_month(messages, |message| extract_year_month(&message.create_time))
+                .into_iter()
+                .map(|(year_month, messages)| HtmlMonth {
+                    year_month,
+                    messages,
+                    index_path: index_path.clone(),
+                })
+                .collect(),
+        )
     }
 
     fn html_filename(&self, group_title: &str, year_month: &str, group_dir: &Path) -> String {
@@ -181,12 +219,28 @@ impl ArchiveStrategy for PerRunArchive {
 pub struct ScheduledGroupArchive;
 
 impl ScheduledGroupArchive {
-    /// 批次时间戳格式：MMDD_HHMMSS → 批次目录名 YYYYMMDD_HHMMSS（跨月排序友好）
-    fn batch_dir_name(batch_stamp: &str) -> String {
-        batch_stamp
-            .replace('-', "")
-            .replace(' ', "_")
-            .replace(':', "")
+    /// 合并写入某月的消息文件（按消息 ID 去重），返回内容是否发生变化
+    fn write_month_messages(
+        group_dir: &Path,
+        year_month: &str,
+        incoming: Vec<Message>,
+    ) -> Result<bool, String> {
+        let path = month_messages_path(group_dir, year_month);
+        let mut merged = read_messages(&path)?;
+        merge_messages(&mut merged, incoming);
+        write_json_if_changed(&path, &merged)
+    }
+
+    /// 合并写入某月的附件索引（按 mediaId+file 去重），返回内容是否发生变化
+    fn write_month_records(
+        group_dir: &Path,
+        year_month: &str,
+        incoming: Vec<serde_json::Value>,
+    ) -> Result<bool, String> {
+        let path = month_index_path(group_dir, year_month);
+        let mut merged = read_records(&path)?;
+        merge_records(&mut merged, incoming);
+        write_json_if_changed(&path, &merged)
     }
 }
 
@@ -202,125 +256,170 @@ impl ArchiveStrategy for ScheduledGroupArchive {
         root.join(name)
     }
 
-    fn messages_path(&self, group_dir: &Path) -> PathBuf {
-        // 由 run_job 在调用前把批次目录写入 group_dir 下的 messages/{批次}/
-        group_dir.join("messages.json")
-    }
-
-    fn index_path(&self, group_dir: &Path) -> PathBuf {
-        group_dir.join("attachments_index.json")
-    }
-
     fn reuse_existing_attachment(&self) -> bool {
         true
     }
 
-    fn messages_for_html(
+    /// 消息按月落盘：messages/{YYYYMM}.json（与 HTML 同粒度，避免单文件无限膨胀）
+    fn persist_messages(
         &self,
         group_dir: &Path,
-        current: &[Message],
-    ) -> Result<Vec<Message>, String> {
-        let mut merged: Vec<Message> = Vec::new();
-        let mut seen = std::collections::HashSet::new();
-
-        // 收集全部历史批次消息
-        let messages_root = group_dir.join("messages");
-        if messages_root.is_dir() {
-            let mut batches: Vec<PathBuf> = fs::read_dir(&messages_root)
-                .map_err(|error| format!("读取批次目录失败: {error}"))?
-                .filter_map(|entry| entry.ok().map(|entry| entry.path()))
-                .filter(|path| path.is_dir())
-                .collect();
-            batches.sort();
-            for batch in batches {
-                let path = batch.join("messages.json");
-                if !path.exists() {
-                    continue;
-                }
-                let content = fs::read_to_string(&path)
-                    .map_err(|error| format!("读取批次消息失败 {}: {}", path.display(), error))?;
-                let batch_messages: Vec<Message> = serde_json::from_str(&content)
-                    .map_err(|error| format!("解析批次消息失败 {}: {}", path.display(), error))?;
-                for message in batch_messages {
-                    if seen.insert(message.open_message_id.clone()) {
-                        merged.push(message);
-                    }
-                }
-            }
-        }
-        // 当前批次若尚未落盘到 messages/（防御），也并入
-        for message in current {
-            if seen.insert(message.open_message_id.clone()) {
-                merged.push(message.clone());
-            }
-        }
-        merged.sort_by(|a, b| {
-            a.create_time
-                .cmp(&b.create_time)
-                .then_with(|| a.open_message_id.cmp(&b.open_message_id))
+        messages: &[Message],
+        _batch_stamp: &str,
+    ) -> Result<Vec<String>, String> {
+        let grouped = group_by_month(messages.to_vec(), |message| {
+            extract_year_month(&message.create_time)
         });
-        Ok(merged)
+        let mut changed = Vec::new();
+        for (year_month, month_messages) in grouped {
+            if Self::write_month_messages(group_dir, &year_month, month_messages)? {
+                changed.push(year_month);
+            }
+        }
+        Ok(changed)
     }
 
-    fn prepare_root_index(&self, group_dir: &Path) -> Result<(), String> {
-        // 合并所有批次索引到群目录根（viewer::build_media_map 读取根索引）
-        let mut merged: Vec<serde_json::Value> = Vec::new();
-        let mut seen_keys = std::collections::HashSet::new();
+    /// 附件索引按月落盘：attachments_index/{YYYYMM}.json
+    fn persist_index(
+        &self,
+        group_dir: &Path,
+        records: &[serde_json::Value],
+    ) -> Result<Vec<String>, String> {
+        let grouped = group_by_month(records.to_vec(), record_month);
+        let mut changed = Vec::new();
+        for (year_month, month_records) in grouped {
+            if Self::write_month_records(group_dir, &year_month, month_records)? {
+                changed.push(year_month);
+            }
+        }
+        Ok(changed)
+    }
+
+    /// 只重建「本次有变化 / HTML 缺失 / 数据比 HTML 新」的月份，避免每次全量重写
+    fn html_months(
+        &self,
+        group_dir: &Path,
+        group_title: &str,
+        changed_months: &[String],
+    ) -> Result<Vec<HtmlMonth>, String> {
         let messages_root = group_dir.join("messages");
+        let mut months: BTreeSet<String> = changed_months.iter().cloned().collect();
         if messages_root.is_dir() {
-            let mut batches: Vec<PathBuf> = fs::read_dir(&messages_root)
-                .map_err(|error| format!("读取批次目录失败: {error}"))?
-                .filter_map(|entry| entry.ok().map(|entry| entry.path()))
-                .filter(|path| path.is_dir())
-                .collect();
-            batches.sort();
-            for batch in batches {
-                let path = batch.join("attachments_index.json");
-                if !path.exists() {
+            for entry in fs::read_dir(&messages_root)
+                .map_err(|error| format!("读取 {} 失败: {}", messages_root.display(), error))?
+            {
+                let path = entry
+                    .map_err(|error| format!("读取月度消息目录失败: {error}"))?
+                    .path();
+                if !path.is_file() {
                     continue;
                 }
-                let content = fs::read_to_string(&path).map_err(|error| {
-                    format!("读取批次附件索引失败 {}: {}", path.display(), error)
-                })?;
-                let records: Vec<serde_json::Value> =
-                    serde_json::from_str(&content).map_err(|error| {
-                        format!("解析批次附件索引失败 {}: {}", path.display(), error)
-                    })?;
-                for record in records {
-                    // 去重键：mediaId + file；同一附件重复拉取时保留 status=ok 的记录
-                    let key = format!(
-                        "{}|{}",
-                        record.get("mediaId").and_then(|v| v.as_str()).unwrap_or(""),
-                        record.get("file").and_then(|v| v.as_str()).unwrap_or("")
-                    );
-                    if seen_keys.contains(&key) {
-                        // 已存在记录：若新记录成功而旧记录失败，替换之
-                        if record.get("status").and_then(|v| v.as_str()) == Some("ok") {
-                            if let Some(existing) = merged.iter_mut().find(|item| {
-                                format!(
-                                    "{}|{}",
-                                    item.get("mediaId").and_then(|v| v.as_str()).unwrap_or(""),
-                                    item.get("file").and_then(|v| v.as_str()).unwrap_or("")
-                                ) == key
-                            }) {
-                                if existing.get("status").and_then(|v| v.as_str()) != Some("ok") {
-                                    *existing = record;
-                                }
-                            }
-                        }
-                        continue;
-                    }
-                    seen_keys.insert(key);
-                    merged.push(record);
+                if path.extension().and_then(|value| value.to_str()) != Some("json") {
+                    continue;
+                }
+                if let Some(stem) = path.file_stem().and_then(|value| value.to_str()) {
+                    months.insert(stem.to_string());
                 }
             }
         }
-        write_json(&group_dir.join("attachments_index.json"), &merged)
+
+        let mut plan = Vec::new();
+        for year_month in months {
+            let message_path = month_messages_path(group_dir, &year_month);
+            if !message_path.is_file() {
+                continue; // 只有索引变化的月份（如首次生成索引）无消息可渲染
+            }
+            let html_path = group_dir.join(self.html_filename(group_title, &year_month, group_dir));
+            let index_path = month_index_path(group_dir, &year_month);
+            let need_rebuild = changed_months.iter().any(|month| month == &year_month)
+                || !html_path.is_file()
+                || is_newer(&message_path, &html_path)
+                || is_newer(&index_path, &html_path);
+            if !need_rebuild {
+                continue;
+            }
+            let messages = read_messages(&message_path)?;
+            if messages.is_empty() {
+                continue;
+            }
+            plan.push(HtmlMonth {
+                year_month,
+                messages,
+                index_path,
+            });
+        }
+        Ok(plan)
     }
 
     fn html_filename(&self, group_title: &str, year_month: &str, _group_dir: &Path) -> String {
         // 固定文件名：合并重建时直接覆盖同名月度 HTML
         format!("{}-{}.html", sanitize_filename(group_title), year_month)
+    }
+
+    /// 旧布局（messages/{批次}/messages.json + 根 attachments_index.json）
+    /// 一次性合并进月度文件；确认写入成功后删除旧数据。
+    fn migrate_legacy(&self, group_dir: &Path) -> Result<(), String> {
+        let messages_root = group_dir.join("messages");
+        if !messages_root.is_dir() {
+            return Ok(());
+        }
+        let mut batches: Vec<PathBuf> = fs::read_dir(&messages_root)
+            .map_err(|error| format!("读取 {} 失败: {}", messages_root.display(), error))?
+            .filter_map(|entry| entry.ok().map(|entry| entry.path()))
+            .filter(|path| path.is_dir())
+            .collect();
+        if batches.is_empty() {
+            return Ok(());
+        }
+        batches.sort();
+
+        // 1. 读取全部旧批次（消息 + 附件索引），按月归集
+        let mut month_messages: BTreeMap<String, Vec<Message>> = BTreeMap::new();
+        let mut month_records: BTreeMap<String, Vec<serde_json::Value>> = BTreeMap::new();
+        for batch in &batches {
+            for message in read_messages(&batch.join("messages.json"))? {
+                month_messages
+                    .entry(extract_year_month(&message.create_time))
+                    .or_default()
+                    .push(message);
+            }
+            for record in read_records(&batch.join("attachments_index.json"))? {
+                month_records
+                    .entry(record_month(&record))
+                    .or_default()
+                    .push(record);
+            }
+        }
+
+        // 2. 先合并进月度文件（写入成功后才允许删除旧数据）
+        for (year_month, messages) in month_messages {
+            Self::write_month_messages(group_dir, &year_month, messages)?;
+        }
+        for (year_month, records) in month_records {
+            Self::write_month_records(group_dir, &year_month, records)?;
+        }
+
+        // 3. 删除旧批次目录（内容已完整并入月度文件）
+        for batch in &batches {
+            if let Err(error) = fs::remove_dir_all(batch) {
+                eprintln!(
+                    "[exporter] 删除旧批次目录 {} 失败: {error}",
+                    batch.display()
+                );
+            }
+        }
+
+        // 4. 根合并索引已由月度索引覆盖，移除避免继续膨胀
+        let root_index = group_dir.join("attachments_index.json");
+        if root_index.is_file() {
+            if let Err(error) = fs::remove_file(&root_index) {
+                eprintln!(
+                    "[exporter] 移除根附件索引 {} 失败: {error}",
+                    root_index.display()
+                );
+            }
+        }
+        Ok(())
     }
 }
 
@@ -408,42 +507,19 @@ fn export_single_group(
         .archive
         .group_dir(Path::new(&job.output_root), group, &batch_stamp);
 
-    // ScheduledGroup 模式：消息与索引落盘到批次子目录
-    let (messages_path, index_path, attachment_dir) =
-        if matches!(job.trigger, Trigger::Scheduled { .. }) {
-            let batch_name = ScheduledGroupArchive::batch_dir_name(&batch_stamp);
-            let batch_dir = group_dir.join("messages").join(&batch_name);
-            if let Err(error) = fs::create_dir_all(&batch_dir) {
-                return Err(GroupError::Failed(vec![format!(
-                    "群「{}」创建批次目录失败: {}",
-                    group.title, error
-                )]));
-            }
-            (
-                batch_dir.join("messages.json"),
-                batch_dir.join("attachments_index.json"),
-                group_dir.join("attachments"),
-            )
-        } else {
-            if let Err(error) = fs::create_dir_all(&group_dir) {
-                return Err(GroupError::Failed(vec![format!(
-                    "群「{}」创建目录失败: {}",
-                    group.title, error
-                )]));
-            }
-            (
-                job.archive.messages_path(&group_dir),
-                job.archive.index_path(&group_dir),
-                group_dir.join("attachments"),
-            )
-        };
-
+    let attachment_dir = group_dir.join("attachments");
     if let Err(error) = fs::create_dir_all(&attachment_dir) {
         return Err(GroupError::Failed(vec![format!(
-            "群「{}」创建附件目录失败: {}",
+            "群「{}」创建输出目录失败: {}",
             group.title, error
         )]));
     }
+
+    // 0. 兼容旧布局：历史批次目录一次性合并进月度 JSON（幂等）
+    if let Err(error) = job.archive.migrate_legacy(&group_dir) {
+        progress.log(&format!("群「{}」迁移历史批次失败: {}", group.title, error));
+    }
+    let mut changed_months: Vec<String> = Vec::new();
 
     // 时间范围提示
     match &job.start_time {
@@ -492,12 +568,23 @@ fn export_single_group(
         progress.log(&format!("实际最新消息: {}", latest));
     }
 
-    // 2. 消息落盘
-    if let Err(error) = write_json(&messages_path, &messages) {
-        return Err(GroupError::Failed(vec![format!(
-            "群「{}」写 messages.json 失败: {}",
-            group.title, error
-        )]));
+    // 2. 消息落盘（按月合并去重：messages/{YYYYMM}.json）
+    match job
+        .archive
+        .persist_messages(&group_dir, &messages, &batch_stamp)
+    {
+        Ok(months) => {
+            if !months.is_empty() {
+                progress.log(&format!("消息更新月份: {}", months.join(", ")));
+            }
+            changed_months.extend(months);
+        }
+        Err(error) => {
+            return Err(GroupError::Failed(vec![format!(
+                "群「{}」写消息 JSON 失败: {}",
+                group.title, error
+            )]));
+        }
     }
 
     // 3. 下载附件
@@ -609,18 +696,22 @@ fn export_single_group(
 
     if job.cancel.load(Ordering::Relaxed) {
         // 取消：尽力保存断点索引
-        if let Err(error) = write_json(&index_path, &attachments) {
+        if let Err(error) = job.archive.persist_index(&group_dir, &attachments) {
             progress.log(&format!("保存断点附件索引失败: {error}"));
         }
         return Err(GroupError::Cancelled);
     }
 
-    if let Err(error) = write_json(&index_path, &attachments) {
-        errors.push(format!(
-            "群「{}」写 attachments_index.json 失败: {}",
-            group.title, error
-        ));
-        return Err(GroupError::Failed(errors));
+    // 附件索引按月落盘：attachments_index/{YYYYMM}.json
+    match job.archive.persist_index(&group_dir, &attachments) {
+        Ok(months) => changed_months.extend(months),
+        Err(error) => {
+            errors.push(format!(
+                "群「{}」写附件索引 JSON 失败: {}",
+                group.title, error
+            ));
+            return Err(GroupError::Failed(errors));
+        }
     }
     let successful_attachments = attachments
         .iter()
@@ -637,41 +728,30 @@ fn export_single_group(
         successful_attachments, media_count
     ));
 
-    // 4. 月度 HTML 生成
+    // 4. 月度 HTML 生成（只重建「有变化 / HTML 缺失 / 数据比 HTML 新」的月份）
     progress.progress("准备生成聊天记录页面...".to_string());
 
-    // ScheduledGroup：先合并根索引（viewer 依赖群目录根的 attachments_index.json）
-    if let Err(error) = job.archive.prepare_root_index(&group_dir) {
-        errors.push(format!("群「{}」合并附件索引失败: {}", group.title, error));
-    }
-
-    let html_messages = match job.archive.messages_for_html(&group_dir, &messages) {
-        Ok(merged) => merged,
+    let plan = match job
+        .archive
+        .html_months(&group_dir, &group.title, &changed_months)
+    {
+        Ok(plan) => plan,
         Err(error) => {
-            errors.push(format!("群「{}」合并历史消息失败: {}", group.title, error));
-            messages.clone()
+            errors.push(format!(
+                "群「{}」规划 HTML 生成失败: {}",
+                group.title, error
+            ));
+            Vec::new()
         }
     };
-
-    let mut messages_by_month: BTreeMap<String, Vec<&Message>> = BTreeMap::new();
-    for message in &html_messages {
-        let year_month = extract_year_month(&message.create_time);
-        messages_by_month
-            .entry(year_month)
-            .or_default()
-            .push(message);
-    }
-    progress.log(&format!(
-        "HTML 渲染范围: {} 条消息，分布在 {} 个月份",
-        html_messages.len(),
-        messages_by_month.len()
-    ));
+    progress.log(&format!("本次需生成/更新 {} 个月份", plan.len()));
 
     let mut html_files_info: Vec<HtmlFileInfo> = Vec::new();
-    for (year_month, month_messages) in &messages_by_month {
+    for month in &plan {
         if job.cancel.load(Ordering::Relaxed) {
             break;
         }
+        let year_month = &month.year_month;
         progress.progress(format!(
             "生成 {} 年 {} 月聊天记录...",
             &year_month[0..4.min(year_month.len())],
@@ -681,7 +761,8 @@ fn export_single_group(
                 "?"
             }
         ));
-        let month_attachment_count: usize = month_messages
+        let month_attachment_count: usize = month
+            .messages
             .iter()
             .map(|message| media::extract_media_ids(&message.content).len())
             .sum();
@@ -690,12 +771,10 @@ fn export_single_group(
             .html_filename(&group.title, year_month, &group_dir);
         let html_path = group_dir.join(&html_file_name);
         match viewer::generate_html(
-            &month_messages
-                .iter()
-                .map(|message| (*message).clone())
-                .collect::<Vec<_>>(),
+            &month.messages,
             &group.title,
             &attachment_dir,
+            &month.index_path,
             &job.self_name,
             &html_path,
             &job.cancel,
@@ -705,14 +784,14 @@ fn export_single_group(
                 progress.log(&format!(
                     "已生成: {}（{} 条消息, {} 个附件, {:.1} MB）",
                     html_file_name,
-                    month_messages.len(),
+                    month.messages.len(),
                     month_attachment_count,
                     file_size as f64 / 1_048_576.0
                 ));
                 html_files_info.push(HtmlFileInfo {
                     filename: html_file_name.clone(),
                     year_month: year_month.clone(),
-                    message_count: month_messages.len(),
+                    message_count: month.messages.len(),
                     attachment_count: month_attachment_count,
                     file_size_bytes: file_size,
                 });
@@ -814,20 +893,188 @@ fn split_batch_stamp(stamp: &str) -> (String, String) {
     }
 }
 
-pub(crate) fn write_json(path: &Path, value: &impl Serialize) -> Result<(), String> {
-    // 原子写入：先写临时文件，成功后重命名
+/// 原子写入 JSON（先写临时文件，成功后重命名）
+pub(crate) fn write_json(path: &Path, value: &(impl Serialize + ?Sized)) -> Result<(), String> {
+    let serialized = serde_json::to_string_pretty(value)
+        .map_err(|error| format!("序列化 {} 失败: {}", path.display(), error))?;
+    atomic_write(path, serialized.as_bytes())
+}
+
+/// 原子写入：先写临时文件，成功后重命名（自动创建父目录）
+fn atomic_write(path: &Path, bytes: &[u8]) -> Result<(), String> {
+    if let Some(parent) = path.parent() {
+        if !parent.as_os_str().is_empty() {
+            fs::create_dir_all(parent)
+                .map_err(|error| format!("创建目录 {} 失败: {}", parent.display(), error))?;
+        }
+    }
     let temp_path = path.with_extension("tmp");
     let file = fs::File::create(&temp_path)
         .map_err(|error| format!("创建 {} 失败: {}", temp_path.display(), error))?;
     let mut writer = std::io::BufWriter::new(file);
-    serde_json::to_writer_pretty(&mut writer, value)
-        .map_err(|error| format!("序列化 {} 失败: {}", temp_path.display(), error))?;
+    writer
+        .write_all(bytes)
+        .map_err(|error| format!("写入 {} 失败: {}", temp_path.display(), error))?;
     writer
         .flush()
         .map_err(|error| format!("刷新 {} 失败: {}", temp_path.display(), error))?;
     drop(writer);
     fs::rename(&temp_path, path)
-        .map_err(|error| format!("重命名 {} 失败: {}", temp_path.display(), error))
+        .map_err(|error| format!("重命名 {} 失败: {}", path.display(), error))
+}
+
+/// 序列化写入；内容与现有文件完全一致时跳过写入（返回 false，避免无意义刷新 mtime）
+fn write_json_if_changed(path: &Path, value: &(impl Serialize + ?Sized)) -> Result<bool, String> {
+    let serialized = serde_json::to_string_pretty(value)
+        .map_err(|error| format!("序列化 {} 失败: {}", path.display(), error))?;
+    if let Ok(existing) = fs::read_to_string(path) {
+        if existing == serialized {
+            return Ok(false);
+        }
+    }
+    atomic_write(path, serialized.as_bytes())?;
+    Ok(true)
+}
+
+// ===== 月度分文件布局：messages/{YYYYMM}.json + attachments_index/{YYYYMM}.json =====
+
+/// 月度消息文件路径
+fn month_messages_path(group_dir: &Path, year_month: &str) -> PathBuf {
+    group_dir
+        .join("messages")
+        .join(format!("{year_month}.json"))
+}
+
+/// 月度附件索引文件路径
+fn month_index_path(group_dir: &Path, year_month: &str) -> PathBuf {
+    group_dir
+        .join("attachments_index")
+        .join(format!("{year_month}.json"))
+}
+
+/// 读取消息 JSON（文件不存在视为空）
+fn read_messages(path: &Path) -> Result<Vec<Message>, String> {
+    if !path.exists() {
+        return Ok(Vec::new());
+    }
+    let content = fs::read_to_string(path)
+        .map_err(|error| format!("读取 {} 失败: {}", path.display(), error))?;
+    serde_json::from_str(&content)
+        .map_err(|error| format!("解析 {} 失败: {}", path.display(), error))
+}
+
+/// 读取附件索引 JSON（文件不存在视为空）
+fn read_records(path: &Path) -> Result<Vec<serde_json::Value>, String> {
+    if !path.exists() {
+        return Ok(Vec::new());
+    }
+    let content = fs::read_to_string(path)
+        .map_err(|error| format!("读取 {} 失败: {}", path.display(), error))?;
+    serde_json::from_str(&content)
+        .map_err(|error| format!("解析 {} 失败: {}", path.display(), error))
+}
+
+/// 合并消息并按消息 ID 去重（已有记录优先保留），结果按时间排序
+fn merge_messages(base: &mut Vec<Message>, incoming: impl IntoIterator<Item = Message>) {
+    let mut seen: HashSet<String> = base
+        .iter()
+        .map(|message| message.open_message_id.clone())
+        .collect();
+    for message in incoming {
+        if seen.insert(message.open_message_id.clone()) {
+            base.push(message);
+        }
+    }
+    base.sort_by(|left, right| {
+        left.create_time
+            .cmp(&right.create_time)
+            .then_with(|| left.open_message_id.cmp(&right.open_message_id))
+    });
+}
+
+/// 附件索引去重键：mediaId + file
+fn record_key(record: &serde_json::Value) -> String {
+    format!(
+        "{}|{}",
+        record
+            .get("mediaId")
+            .and_then(|value| value.as_str())
+            .unwrap_or(""),
+        record
+            .get("file")
+            .and_then(|value| value.as_str())
+            .unwrap_or("")
+    )
+}
+
+/// 合并附件索引并按 mediaId+file 去重：成功记录覆盖同键的失败记录
+fn merge_records(
+    base: &mut Vec<serde_json::Value>,
+    incoming: impl IntoIterator<Item = serde_json::Value>,
+) {
+    let mut position_of: HashMap<String, usize> = base
+        .iter()
+        .enumerate()
+        .map(|(index, record)| (record_key(record), index))
+        .collect();
+    for record in incoming {
+        let key = record_key(&record);
+        match position_of.get(&key) {
+            Some(&position) => {
+                let existing_ok = base[position]
+                    .get("status")
+                    .and_then(|value| value.as_str())
+                    == Some("ok");
+                let incoming_ok =
+                    record.get("status").and_then(|value| value.as_str()) == Some("ok");
+                if !existing_ok && incoming_ok {
+                    base[position] = record;
+                }
+            }
+            None => {
+                position_of.insert(key, base.len());
+                base.push(record);
+            }
+        }
+    }
+}
+
+/// 附件记录归属月份：优先取 file 相对路径首段（YYYYMM），回退到 createTime
+fn record_month(record: &serde_json::Value) -> String {
+    if let Some(file) = record.get("file").and_then(|value| value.as_str()) {
+        if let Some((head, _)) = file.split_once('/') {
+            if head.len() == 6 && head.chars().all(|character| character.is_ascii_digit()) {
+                return head.to_string();
+            }
+        }
+    }
+    record
+        .get("createTime")
+        .and_then(|value| value.as_str())
+        .map(extract_year_month)
+        .unwrap_or_else(|| "unknown".to_string())
+}
+
+/// 按月份分组（月份升序）
+fn group_by_month<T>(
+    items: impl IntoIterator<Item = T>,
+    month_of: impl Fn(&T) -> String,
+) -> BTreeMap<String, Vec<T>> {
+    let mut grouped: BTreeMap<String, Vec<T>> = BTreeMap::new();
+    for item in items {
+        let month = month_of(&item);
+        grouped.entry(month).or_default().push(item);
+    }
+    grouped
+}
+
+/// 左侧文件修改时间是否晚于右侧（任一不可读时返回 false）
+fn is_newer(candidate: &Path, reference: &Path) -> bool {
+    let modified_at = |path: &Path| path.metadata().ok().and_then(|meta| meta.modified().ok());
+    match (modified_at(candidate), modified_at(reference)) {
+        (Some(left), Some(right)) => left > right,
+        _ => false,
+    }
 }
 
 pub(crate) fn media_extension(content: &str) -> String {
@@ -1041,96 +1288,255 @@ mod tests {
         );
     }
 
-    #[test]
-    fn scheduled_messages_merge_dedupes_and_sorts() {
-        let temp_dir = std::env::temp_dir().join(format!(
-            "dingtalk-exporter-merge-test-{}",
-            std::process::id()
-        ));
-        let _ = fs::remove_dir_all(&temp_dir);
-        let batch_a = temp_dir.join("messages").join("20260101_023000");
-        let batch_b = temp_dir.join("messages").join("20260201_023000");
-        fs::create_dir_all(&batch_a).unwrap();
-        fs::create_dir_all(&batch_b).unwrap();
-
-        let message = |id: &str, time: &str| Message {
+    fn sample_message(id: &str, time: &str) -> Message {
+        Message {
             content: format!("内容-{id}"),
             create_time: time.into(),
             open_message_id: id.into(),
             sender: "张三".into(),
             sender_open_dingtalk_id: None,
             open_conv_thread_id: None,
-        };
-        // 批次A: m1, m2；批次B: m2(重复), m3；当前批次: m3(重复), m4
-        write_json(
-            &batch_a.join("messages.json"),
-            &vec![
-                message("m1", "2026-01-01 10:00:00"),
-                message("m2", "2026-01-15 10:00:00"),
-            ],
-        )
-        .unwrap();
-        write_json(
-            &batch_b.join("messages.json"),
-            &vec![
-                message("m2", "2026-01-15 10:00:00"),
-                message("m3", "2026-02-01 10:00:00"),
-            ],
-        )
-        .unwrap();
+        }
+    }
 
+    fn unique_dir(tag: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!(
+            "dingtalk-exporter-{}-{}-{}",
+            tag,
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    #[test]
+    fn scheduled_messages_are_split_by_month_and_deduped() {
+        let temp_dir = unique_dir("month-messages");
         let archive = ScheduledGroupArchive;
-        let merged = archive
-            .messages_for_html(
+
+        // 第一次：1 月两条 → 只生成 202601 文件
+        let changed = archive
+            .persist_messages(
                 &temp_dir,
                 &[
-                    message("m3", "2026-02-01 10:00:00"),
-                    message("m4", "2026-02-15 10:00:00"),
+                    sample_message("m1", "2026-01-01 10:00:00"),
+                    sample_message("m2", "2026-01-15 10:00:00"),
                 ],
+                "2026-01-20 10:00:00",
             )
             .unwrap();
-        assert_eq!(merged.len(), 4);
-        let ids: Vec<&str> = merged
+        assert_eq!(changed, vec!["202601".to_string()]);
+        assert!(temp_dir.join("messages").join("202601.json").is_file());
+        assert!(!temp_dir.join("messages").join("202602.json").exists());
+
+        // 第二次：重复 m2（1 月内容不变）+ 新增 2 月 m3
+        let changed = archive
+            .persist_messages(
+                &temp_dir,
+                &[
+                    sample_message("m2", "2026-01-15 10:00:00"),
+                    sample_message("m3", "2026-02-01 10:00:00"),
+                ],
+                "2026-02-01 10:00:00",
+            )
+            .unwrap();
+        // 内容未变化的月份不重写、不算变化
+        assert_eq!(changed, vec!["202602".to_string()]);
+
+        let january = read_messages(&temp_dir.join("messages").join("202601.json")).unwrap();
+        let january_ids: Vec<&str> = january
             .iter()
             .map(|message| message.open_message_id.as_str())
             .collect();
-        assert_eq!(ids, vec!["m1", "m2", "m3", "m4"]); // 去重且按时间排序
+        assert_eq!(january_ids, vec!["m1", "m2"]);
+        assert_eq!(
+            read_messages(&temp_dir.join("messages").join("202602.json"))
+                .unwrap()
+                .len(),
+            1
+        );
+
+        // 第三次：完全相同的输入 → 无任何变化
+        let changed = archive
+            .persist_messages(
+                &temp_dir,
+                &[sample_message("m3", "2026-02-01 10:00:00")],
+                "2026-02-02 10:00:00",
+            )
+            .unwrap();
+        assert!(changed.is_empty());
 
         fs::remove_dir_all(&temp_dir).unwrap();
     }
 
     #[test]
-    fn scheduled_root_index_merges_and_prefers_ok_status() {
-        let temp_dir = std::env::temp_dir().join(format!(
-            "dingtalk-exporter-index-test-{}",
-            std::process::id()
-        ));
-        let _ = fs::remove_dir_all(&temp_dir);
+    fn scheduled_index_is_split_by_month_and_prefers_ok_status() {
+        let temp_dir = unique_dir("month-index");
+        let archive = ScheduledGroupArchive;
+
+        // 1 月：同一附件先失败
+        archive
+            .persist_index(
+                &temp_dir,
+                &[serde_json::json!({ "mediaId": "media1", "file": "202601/a.jpg", "status": "fail" })],
+            )
+            .unwrap();
+
+        // 重试成功（1 月内容变化）+ 2 月新增
+        let changed = archive
+            .persist_index(
+                &temp_dir,
+                &[
+                    serde_json::json!({ "mediaId": "media1", "file": "202601/a.jpg", "status": "ok" }),
+                    serde_json::json!({ "mediaId": "media2", "file": "202602/b.jpg", "status": "ok" }),
+                ],
+            )
+            .unwrap();
+        assert_eq!(changed, vec!["202601".to_string(), "202602".to_string()]);
+
+        let january =
+            read_records(&temp_dir.join("attachments_index").join("202601.json")).unwrap();
+        assert_eq!(january.len(), 1);
+        assert_eq!(january[0]["status"], "ok"); // 成功记录覆盖失败记录
+        let february =
+            read_records(&temp_dir.join("attachments_index").join("202602.json")).unwrap();
+        assert_eq!(february.len(), 1);
+
+        fs::remove_dir_all(&temp_dir).unwrap();
+    }
+
+    #[test]
+    fn legacy_batches_are_migrated_into_monthly_files_then_removed() {
+        let temp_dir = unique_dir("legacy-migration");
         let batch_a = temp_dir.join("messages").join("20260101_023000");
         let batch_b = temp_dir.join("messages").join("20260201_023000");
         fs::create_dir_all(&batch_a).unwrap();
         fs::create_dir_all(&batch_b).unwrap();
-
-        // 批次A：media1 失败；批次B：media1 成功 + media2 成功
-        write_json(&batch_a.join("attachments_index.json"), &vec![
-            serde_json::json!({ "mediaId": "media1", "file": "202601/a.jpg", "status": "fail" }),
-        ]).unwrap();
+        write_json(
+            &batch_a.join("messages.json"),
+            &vec![
+                sample_message("m1", "2026-01-01 10:00:00"),
+                sample_message("m2", "2026-01-15 10:00:00"),
+            ],
+        )
+        .unwrap();
+        write_json(
+            &batch_a.join("attachments_index.json"),
+            &vec![
+                serde_json::json!({ "mediaId": "media1", "file": "202601/a.jpg", "status": "ok" }),
+            ],
+        )
+        .unwrap();
+        write_json(
+            &batch_b.join("messages.json"),
+            &vec![sample_message("m3", "2026-02-01 10:00:00")],
+        )
+        .unwrap();
         write_json(
             &batch_b.join("attachments_index.json"),
             &vec![
-                serde_json::json!({ "mediaId": "media1", "file": "202601/a.jpg", "status": "ok" }),
                 serde_json::json!({ "mediaId": "media2", "file": "202602/b.jpg", "status": "ok" }),
             ],
         )
         .unwrap();
+        // 旧布局的根合并索引
+        write_json(
+            &temp_dir.join("attachments_index.json"),
+            &vec![serde_json::json!({ "mediaId": "legacy" })],
+        )
+        .unwrap();
 
+        ScheduledGroupArchive.migrate_legacy(&temp_dir).unwrap();
+
+        // 旧批次目录与根索引已清理
+        assert!(!batch_a.exists());
+        assert!(!batch_b.exists());
+        assert!(!temp_dir.join("attachments_index.json").exists());
+        // 月度文件已生成
+        assert_eq!(
+            read_messages(&temp_dir.join("messages").join("202601.json"))
+                .unwrap()
+                .len(),
+            2
+        );
+        assert_eq!(
+            read_messages(&temp_dir.join("messages").join("202602.json"))
+                .unwrap()
+                .len(),
+            1
+        );
+        assert_eq!(
+            read_records(&temp_dir.join("attachments_index").join("202601.json"))
+                .unwrap()
+                .len(),
+            1
+        );
+        assert_eq!(
+            read_records(&temp_dir.join("attachments_index").join("202602.json"))
+                .unwrap()
+                .len(),
+            1
+        );
+
+        // 幂等：无旧批次时再跑一次不报错
+        ScheduledGroupArchive.migrate_legacy(&temp_dir).unwrap();
+
+        fs::remove_dir_all(&temp_dir).unwrap();
+    }
+
+    #[test]
+    fn html_plan_only_includes_changed_or_missing_months() {
+        let temp_dir = unique_dir("html-plan");
         let archive = ScheduledGroupArchive;
-        archive.prepare_root_index(&temp_dir).unwrap();
-        let content = fs::read_to_string(temp_dir.join("attachments_index.json")).unwrap();
-        let records: Vec<serde_json::Value> = serde_json::from_str(&content).unwrap();
-        assert_eq!(records.len(), 2);
-        let media1 = records.iter().find(|r| r["mediaId"] == "media1").unwrap();
-        assert_eq!(media1["status"], "ok"); // 成功记录覆盖失败记录
+        let group = "测试群";
+
+        archive
+            .persist_messages(
+                &temp_dir,
+                &[
+                    sample_message("m1", "2026-01-01 10:00:00"),
+                    sample_message("m3", "2026-02-01 10:00:00"),
+                ],
+                "2026-02-02 10:00:00",
+            )
+            .unwrap();
+        archive
+            .persist_index(
+                &temp_dir,
+                &[
+                    serde_json::json!({ "mediaId": "media1", "file": "202601/a.jpg", "status": "ok" }),
+                    serde_json::json!({ "mediaId": "media2", "file": "202602/b.jpg", "status": "ok" }),
+                ],
+            )
+            .unwrap();
+
+        // 两个月的 HTML 都不存在 → 都要生成
+        let plan = archive.html_months(&temp_dir, group, &[]).unwrap();
+        let months: Vec<&str> = plan.iter().map(|month| month.year_month.as_str()).collect();
+        assert_eq!(months, vec!["202601", "202602"]);
+
+        // 补上 HTML（时间晚于 JSON）后，无变化月份不再重建
+        for year_month in ["202601", "202602"] {
+            fs::write(
+                temp_dir.join(format!("{group}-{year_month}.html")),
+                b"<html></html>",
+            )
+            .unwrap();
+        }
+        assert!(archive
+            .html_months(&temp_dir, group, &[])
+            .unwrap()
+            .is_empty());
+        let plan = archive
+            .html_months(&temp_dir, group, &["202602".to_string()])
+            .unwrap();
+        let months: Vec<&str> = plan.iter().map(|month| month.year_month.as_str()).collect();
+        assert_eq!(months, vec!["202602"]);
 
         fs::remove_dir_all(&temp_dir).unwrap();
     }

@@ -53,10 +53,15 @@ enum MediaKind {
     File,
 }
 
+/// 生成某个月的聊天记录 HTML。
+///
+/// `index_path` 显式指定附件索引文件（手动导出 = 群目录根索引；
+/// 定时导出 = attachments_index/{YYYYMM}.json 月度索引）。
 pub fn generate_html(
     messages: &[Message],
     group_title: &str,
     attachments_dir: &Path,
+    index_path: &Path,
     self_name: &str,
     output_path: &Path,
     cancel: &AtomicBool,
@@ -64,7 +69,7 @@ pub fn generate_html(
     if cancel.load(Ordering::Relaxed) {
         return Err(crate::dws::CANCELLED_ERROR.into());
     }
-    let media_map = build_media_map(attachments_dir)?;
+    let media_map = build_media_map(attachments_dir, index_path)?;
     let file = File::create(output_path)
         .map_err(|error| format!("创建 HTML {} 失败: {}", output_path.display(), error))?;
     let mut writer = BufWriter::new(file);
@@ -367,16 +372,15 @@ fn kind_from_mime(mime: &str) -> MediaKind {
     }
 }
 
-fn build_media_map(attachments_dir: &Path) -> Result<HashMap<String, Vec<MediaFile>>, String> {
+fn build_media_map(
+    attachments_dir: &Path,
+    index_path: &Path,
+) -> Result<HashMap<String, Vec<MediaFile>>, String> {
     let mut map: HashMap<String, Vec<MediaFile>> = HashMap::new();
-    let Some(parent) = attachments_dir.parent() else {
-        return Ok(map);
-    };
-    let index_path = parent.join("attachments_index.json");
     if !index_path.exists() {
         return Ok(map);
     }
-    let index_text = fs::read_to_string(&index_path)
+    let index_text = fs::read_to_string(index_path)
         .map_err(|error| format!("读取 {} 失败: {}", index_path.display(), error))?;
     let records: Vec<AttachmentRecord> = serde_json::from_str(&index_text)
         .map_err(|error| format!("解析 {} 失败: {}", index_path.display(), error))?;
@@ -596,7 +600,16 @@ mod tests {
         ));
         let attachments = output.with_extension("attachments");
         let cancel = AtomicBool::new(false);
-        generate_html(&[], "空群", &attachments, "", &output, &cancel).unwrap();
+        generate_html(
+            &[],
+            "空群",
+            &attachments,
+            &attachments.with_extension("attachments_index.json"),
+            "",
+            &output,
+            &cancel,
+        )
+        .unwrap();
         let html = fs::read_to_string(&output).unwrap();
         assert!(html.contains("0</b> 条消息"));
         assert!(html.trim_end().ends_with("</html>"));
@@ -641,7 +654,7 @@ mod tests {
         )
         .unwrap();
 
-        let map = build_media_map(&attachments).unwrap();
+        let map = build_media_map(&attachments, &root.join("attachments_index.json")).unwrap();
         let files = map.get("msg-1").unwrap();
         assert_eq!(files.len(), 1);
         assert_eq!(files[0].download_name, "报告(终版).pdf");
@@ -657,9 +670,17 @@ mod tests {
             std::process::id()
         ));
         let cancel = AtomicBool::new(true);
-        let error = generate_html(&[], "取消群", Path::new("missing"), "", &output, &cancel)
-            .err()
-            .unwrap();
+        let error = generate_html(
+            &[],
+            "取消群",
+            Path::new("missing"),
+            Path::new("missing/attachments_index.json"),
+            "",
+            &output,
+            &cancel,
+        )
+        .err()
+        .unwrap();
         assert_eq!(error, crate::dws::CANCELLED_ERROR);
         assert!(!output.exists());
     }

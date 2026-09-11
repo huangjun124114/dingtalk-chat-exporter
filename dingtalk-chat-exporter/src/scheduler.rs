@@ -114,7 +114,14 @@ pub fn run_now(
     let run_id = insert_running_record(schedule_id, &now, &trigger_time)
         .ok_or_else(|| "插入 running 记录失败".to_string())?;
 
-    let run = execute(inner, cancel_requested, &schedule, &trigger_time, &now, &run_id);
+    let run = execute(
+        inner,
+        cancel_requested,
+        &schedule,
+        &trigger_time,
+        &now,
+        &run_id,
+    );
     let status = run.status.clone();
     {
         let _guard = store_guard();
@@ -220,7 +227,11 @@ where
 
 /// 为指定任务插入一条 running 记录，返回 run_id。
 /// 同时更新 last_run_at / next_run_at（错过不补跑）。
-fn insert_running_record(schedule_id: &str, started_at: &str, trigger_time: &str) -> Option<String> {
+fn insert_running_record(
+    schedule_id: &str,
+    started_at: &str,
+    trigger_time: &str,
+) -> Option<String> {
     let mut store = schedule::load_store().ok()?;
     let schedule = store.find_mut(schedule_id)?;
     let run_id = export_log::generate_timestamp_id();
@@ -453,7 +464,7 @@ fn finalize(schedule_id: &str, run: &ScheduleRun) {
     schedule.last_run_at = Some(finished_now.clone());
     // 错过不补跑：从当前时间重算下次触发
     schedule.next_run_at = schedule::compute_next_run(&schedule.schedule, &finished_now);
-    
+
     // 按 run_id 更新运行记录（而不是 push_run）
     schedule.update_run(&run.run_id, |existing| {
         *existing = run.clone();

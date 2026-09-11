@@ -1073,10 +1073,6 @@ mod tests {
     }
 
     #[test]
-    #[test]
-    #[test]
-    #[test]
-    #[test]
     fn log_offset_tracks_evicted_lines() {
         let state = Arc::new(Mutex::new(AppInner {
             auth: None,
